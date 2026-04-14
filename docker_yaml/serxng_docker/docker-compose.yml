@@ -1,0 +1,18 @@
+version: "3.7"
+services:
+  searxng:
+    container_name: searxng
+    image: searxng/searxng:latest
+    ports:
+      - "8081:8080" # 左边是宿主机端口（改为 8081），右边是容器内端口
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8081/ # URL 端口必须和上面的宿主机端口保持一致
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
