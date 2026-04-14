@@ -73,7 +73,7 @@ docker-compose up -d
 
 如果你对本项目有任何疑问、发现 Bug，或者对 Agentic RAG、多模态大模型落地有更好的想法，欢迎通过以下方式与我交流：
 
-- **Email**: [你的邮箱地址，例如: wyh37133@gmail.com]
+- **Email**: [wyh37133@gmail.com]
 - **GitHub**: [wyh13617290776](https://github.com/wyh13617290776)
 - **技术探讨**: 欢迎在项目的 [Issues](https://github.com/wyh13617290776/Gemma_4_Agentic_RAG/issues) 提出你的宝贵意见！
 
