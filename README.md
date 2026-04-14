@@ -28,7 +28,7 @@
 
 本项目依赖 GPU 加速，请严格按照以下步骤准备依赖：
 
-1. **准备离线包**: 前往 PyTorch 官网下载匹配您本地 CUDA 版本的 `torch` 和 `torchvision` 的 `.whl` 文件 (对应文件夹的README.md中有版本说明)
+1. **准备离线包**: 前往 PyTorch 官网下载匹配您本地 CUDA 版本的 `torch` 和 `torchvision` 的 `.whl` 文件 (对应gemma_4和minerU开头文件夹的README.md中有版本说明)
 2. **分发依赖**: 
    - 将 Gemma 环境所需的 `.whl` 放入 `gemma_4_dependencies/` 目录。
    - 将 MinerU 环境所需的 `.whl` 放入 `minerU_dependencies/` 目录。
@@ -62,11 +62,11 @@
 
 ### 1. 向量数据库 (Milvus)
 负责处理高维向量存储与检索。
-```bash
+```bash```
 cd docker_yaml/milvus_docker
 docker-compose up -d
 
-2. 联网检索中获取url的工具 (SearXNG)
-```bash
+### 2. 联网检索获取url的工具 (SearXNG)
+```bash```
 cd docker_yaml/serxng_docker
 docker-compose up -d
