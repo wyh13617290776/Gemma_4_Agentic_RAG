@@ -56,14 +56,30 @@
 
 ---
 
-## 🐳 Docker 基础设施部署 (Docker Infrastructure)
+## 🐳 Docker 部署 (Docker Infrastructure)
 
 我们在 `docker_yaml` 目录下提供了模块化的容器编排方案，用于一键部署基础设施：
 
 ### 向量数据库 (Milvus) 和 SearXNG
 负责处理高维向量存储与检索以及联网检索获取url。
-```bash
+```bash```
 cd docker_yaml/milvus_docker
 docker-compose up -d
 cd docker_yaml/serxng_docker
 docker-compose up -d
+
+
+## 📧 联系与交流 (Contact)
+
+如果你对本项目有任何疑问、发现 Bug，或者对 Agentic RAG、多模态大模型落地有更好的想法，欢迎通过以下方式与我交流：
+
+- **Email**: [你的邮箱地址，例如: wyh37133@gmail.com]
+- **GitHub**: [wyh13617290776](https://github.com/wyh13617290776)
+- **技术探讨**: 欢迎在项目的 [Issues](https://github.com/wyh13617290776/Gemma_4_Agentic_RAG/issues) 提出你的宝贵意见！
+
+---
+
+## 📄 开源协议 (License)
+
+本项目采用 [MIT License](LICENSE) 开源协议。
+你可以自由地使用、修改和分发本项目的代码，但请保留原作者的版权声明。
