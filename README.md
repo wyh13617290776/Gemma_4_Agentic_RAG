@@ -60,13 +60,10 @@
 
 我们在 `docker_yaml` 目录下提供了模块化的容器编排方案，用于一键部署基础设施：
 
-### 1. 向量数据库 (Milvus)
-负责处理高维向量存储与检索。
-```bash```
+### 向量数据库 (Milvus) 和 SearXNG
+负责处理高维向量存储与检索以及联网检索获取url。
+```bash
 cd docker_yaml/milvus_docker
 docker-compose up -d
-
-### 2. 联网检索获取url的工具 (SearXNG)
-```bash
 cd docker_yaml/serxng_docker
 docker-compose up -d
