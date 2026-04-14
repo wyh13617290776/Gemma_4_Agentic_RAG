@@ -1,0 +1,56 @@
+llm_server:
+  server_exe_path: llama/llama-b8708/llama-server.exe
+  model_path: models/gemma-4-E4B-it-Q4_K_M.gguf
+  mmproj_path: models/mmproj-F16.gguf
+  n_gpu_layers: '22'
+  n_ctx: '18000'
+  n_threads: '16'
+  host: 127.0.0.1
+  port: '8000'
+gemma_features:
+  enable_thinking: true
+  enable_multimodal: true
+  media_limits:
+    max_audio_sec: 30
+    max_video_sec: 60
+llm_generation:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_tokens: 4096
+  stream: true
+rag:
+  collection_name: my_rag_knowledge
+  similarity_top_k: 5
+  retrieval:
+    bm25_nodes_path: local_bm25_nodes.pkl
+    fusion_top_k: 40
+    rerank_top_k: 15
+  reranker:
+    model_path: models/bge-reranker-v2-m3
+    use_fp16: true
+milvus:
+  uri: http://127.0.0.1:19530 # 部署 milvus 向量数据库的url
+  dim: 1024
+embedding:
+  model_path: models/bge-m3
+mineru:
+  exe_path: venv_mineru/Scripts/magic-pdf.exe
+  mfr_batch_size: '8'
+memory:
+  max_window: 3
+  summary_threshold: 5
+search_engines:
+  searxng_url: http://localhost:8081/search  # 部署 SearXNG 的 Docker url
+  searxng_max_results: 5
+  tavily_max_results: 3
+  exa_max_results: 2
+  min_effective_urls: 2
+  min_content_length: 400
+  keyword_coverage: 0.4
+network:
+  # 你的代理服务器地址 (例如 Clash 的默认端口 7897)
+  # 如果不需要代理（比如在海外服务器上），直接留空 "" 即可
+  proxy_url: "http://127.0.0.1:7897"
+  # 不走代理的白名单。必须包含 localhost 和 127.0.0.1，否则无法连接本地 Milvus 和 llama-server
+  no_proxy: "localhost,127.0.0.1,0.0.0.0,::1"

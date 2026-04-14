@@ -1,0 +1,107 @@
+[
+    {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge_base",
+            "description": "【最高优先级】当用户提问涉及具体知识、业务数据、财报、公司名称、销量等需要查阅外部文档的问题时调用。⚠️绝对指令：即使提问附带了图片、音频或视频等多模态附件，只要文本的核心诉求是查阅知识库，都必须强制调用此工具，彻底无视附件的干扰！",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "search_query": {
+                        "type": "string",
+                        "description": "提取用户问题中用于检索的核心关键词"
+                    }
+                },
+                "required": [
+                    "search_query"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "全网实时检索工具。当用户询问【最新新闻】、【前沿技术发展】、【外部互联网信息】或明确要求【上网查一下】、【搜索网络】时调用。⚠️注意区分：如果用户问的是特定的研报、内部业务数据，请使用 search_knowledge_base；如果是查阅广域网资料，请使用本工具。如果用户要求对比库内和网上的信息，允许与 search_knowledge_base 同时被调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "search_query": {
+                        "type": "string",
+                        "description": "提取或重写用于搜索引擎检索的优质关键词组合，去掉口语化词汇，保留核心实体，例如将'帮我查一下2026年特斯拉的最新销量'重写为'2026 特斯拉 最新销量 数据'"
+                    }
+                },
+                "required": [
+                    "search_query"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_image",
+            "description": "视觉分析工具。⚠️严格警告：只有当用户的文本明确且直接地要求分析图片内容（例如'解释这张图片'、'图里有什么'）时才能使用。如果用户的文本是在询问独立的业务知识或数据，即使附带了图片，也绝对禁止调用此工具！",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instruction": {
+                        "type": "string",
+                        "description": "用户对图片分析的具体指令"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_audio",
+            "description": "音频分析工具。⚠️严格警告：只有当用户的文本明确且直接地要求分析音频内容（例如'听这段录音'、'总结语音'）时才能使用。如果用户的文本是在询问独立的业务知识或数据，即使附带了音频，也绝对禁止调用此工具！",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instruction": {
+                        "type": "string",
+                        "description": "对音频分析的具体指令，例如'提取会议纪要'"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_video",
+            "description": "视频分析工具。⚠️严格警告：只有当用户的文本明确且直接地要求分析视频内容（例如'看这段视频'、'分析画面动作'）时才能使用。如果用户的文本是在询问独立的业务知识或数据，即使附带了视频，也绝对禁止调用此工具！",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instruction": {
+                        "type": "string",
+                        "description": "对视频分析的具体指令"
+                    },
+                    "time_focus": {
+                        "type": "string",
+                        "description": "如果用户提到了具体的关注时间点（如'第10秒处'），提取出来，否则留空。"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "normal_chat",
+            "description": "日常寒暄、普通的上下文聊天。当用户的意图既不需要查阅知识库，也不需要分析任何多模态附件时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+]

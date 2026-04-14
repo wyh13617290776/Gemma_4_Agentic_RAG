@@ -1,0 +1,39 @@
+/* ========================================================= */
+/* assets/css/style.css (绝对安全版，不干扰任何原生布局) */
+/* ========================================================= */
+
+/* 1. 核心交互组件：渐变 Primary 主按钮 */
+button[kind="primary"] {
+    background: linear-gradient(135deg, #FF4B4B 0%, #FF7676 100%) !important;
+    border: none !important;
+    color: white !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+button[kind="primary"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 75, 75, 0.3);
+}
+
+/* 2. 核心交互组件：极简 Secondary 次按钮 */
+button[kind="secondary"] {
+    background-color: transparent !important;
+    border: 1.5px solid #E0E2E6 !important;
+    color: #4B4B4B !important;
+    font-weight: 500 !important;
+    border-radius: 8px !important;
+    transition: all 0.2s ease;
+}
+
+button[kind="secondary"]:hover {
+    border: 1.5px solid #FF4B4B !important;
+    color: #FF4B4B !important;
+}
+
+/* 3. 侧边栏与背景质感微调 */
+[data-testid="stSidebar"] {
+    background-color: #F8F9FA !important;
+    border-right: 1px solid #EAECEF !important;
+}
