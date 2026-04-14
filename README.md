@@ -63,10 +63,10 @@
 ### 1. 向量数据库 (Milvus)
 负责处理高维向量存储与检索。
 ```bash```
-```cd docker_yaml/milvus_docker```
-```docker-compose up -d```
+cd docker_yaml/milvus_docker```
+docker-compose up -d```
 
 ### 2. 联网检索获取url的工具 (SearXNG)
 ```bash```
-```cd docker_yaml/serxng_docker
+cd docker_yaml/serxng_docker```
 docker-compose up -d```
