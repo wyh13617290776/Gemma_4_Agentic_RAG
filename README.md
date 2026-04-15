@@ -28,7 +28,7 @@
 
 本项目依赖 GPU 加速，请严格按照以下步骤准备依赖：
 
-1. **准备离线包**: 前往 PyTorch 官网下载匹配您本地 CUDA 版本的 `torch` 和 `torchvision` 的 `.whl` 文件 (对应gemma_4和minerU开头文件夹的README.md中有版本说明)
+1. **准备离线包**: 前往 PyTorch 官网下载匹配您本地 CUDA 版本的 `torch` 和 `torchvision` 的 `.whl` 文件 (对应文件夹的README.md中有版本说明)
 2. **分发依赖**: 
    - 将 Gemma 环境所需的 `.whl` 放入 `gemma_4_dependencies/` 目录。
    - 将 MinerU 环境所需的 `.whl` 放入 `minerU_dependencies/` 目录。
@@ -38,6 +38,31 @@
 4. 脚本将自动构建双环境并在完成后自动拉起 Web UI。
 
 *(注意：请确保 `config/config.yaml` 中的 `mineru.exe_path` 指向 `venv_mineru/Scripts/magic-pdf.exe`)*
+
+### ⚙️ MinerU 引擎配置 (MinerU Configuration)
+
+在完成 `venv_mineru` 环境初始化后，必须配置 MinerU 的模型路径与硬件加速开关。
+请在你的用户根目录下找到（或新建）配置文件 `C:\Users\[用户名]\magic-pdf.json`（Linux/Mac 为 `~/.magic-pdf.json`），并参考你的项目绝对路径进行如下修改：
+
+Windows 环境下的配置：
+```json
+{
+  "models-dir": "F:/Code_Programming/Gemma/Gemma_Agent_Project/models/minerU/models",
+  "device-mode": "cuda",
+  "layout-config": {
+    "model": "doclayout_yolo"
+  },
+  "layoutreader-model-dir": "F:/Code_Programming/Gemma/Gemma_Agent_Project/models/minerU/models/ReadingOrder/layout_reader",
+  "table-config": {
+    "model": "rapid_table",
+    "enable": true,
+    "max_table_shape": 2048,
+    "is_table_recog_enable": true,
+    "max_time": 600
+  }
+}
+```
+*(注意：请确保上方 JSON 中的 `models-dir` 和 `layoutreader-model-dir` 路径与你本机实际的模型存放绝对路径保持一致)*
 
 ---
 
@@ -60,14 +85,20 @@
 
 我们在 `docker_yaml` 目录下提供了模块化的容器编排方案，用于一键部署基础设施：
 
-### 向量数据库 (Milvus) 和 SearXNG
+### 1、向量数据库 (Milvus) 
 负责处理高维向量存储与检索以及联网检索获取url。
-```bash```
+```bash
 cd docker_yaml/milvus_docker
 docker-compose up -d
-cd docker_yaml/serxng_docker
-docker-compose up -d
+```
 
+### 2、url获取工具 (SearXNG)
+```bash
+cd ../serxng_docker
+docker-compose up -d
+```
+
+---
 
 ## 📧 联系与交流 (Contact)
 
