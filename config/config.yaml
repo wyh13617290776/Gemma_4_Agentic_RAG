@@ -20,7 +20,7 @@ llm_generation:
   max_tokens: 4096
   stream: true
 rag:
-  collection_name: my_rag_knowledge
+  collection_name: wyh_rag_knowledge
   similarity_top_k: 5
   retrieval:
     bm25_nodes_path: local_bm25_nodes.pkl
