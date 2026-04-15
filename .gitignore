@@ -4,7 +4,6 @@ __pycache__/
 # 虚拟环境
 venv_gemma/
 venv_mineru/
-env/
 
 # 配置文件与私钥 (绝对不能上传真实密钥！)
 config/secrets.yaml

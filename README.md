@@ -18,6 +18,35 @@
 
 ---
 
+## 📦 模型与核心引擎准备 (Models & Core Engines)
+
+在启动环境部署之前，请务必完成以下核心组件的下载与放置：
+
+1. **llama.cpp 引擎**:
+   - 请前往官方仓库下载适合您本地硬件配置的 `llama.cpp`， [下载llama](https://github.com/ggml-org/llama.cpp/releases?q=b8708&expanded=true) ，Windows环境推荐下载 `Windows x64 (Vulkan)` 版本。
+   - 将解压后的核心可执行文件（如 `llama-server.exe` ）和相关的 `ddl` 文件的文件夹 (如 `llama/llama-b8708` 包含 `*.exe` 和 `*.ddl` ) 直接放置在 **项目根目录** 下。
+
+2. **核心模型权重 (Models)**:
+   - LLM模型及组件 **gemma 4** 模型和多模态组件 **mmproj**，此处仅提供一个我自己的下载组合参考：[gemma-4-E4B-it-Q4_K_M](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf) 和 [mmproj-F16](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf)，放在项目根目录新建的 `models` 文件夹中。
+   - 系统依赖稠密向量检索模型 **bge-m3** [下载bge-m3](https://huggingface.co/BAAI/bge-m3/tree/main) 
+   - **⚠️注意**: 由于 Pytorch 版本支持问题，需将 `bge-m3` 中的 `pytorch_model.bin` 文件替换成：`model.safetensors` [下载model.safetensors](https://huggingface.co/trollathon/bge-m3-safetensors/blob/main/model.safetensors) 
+   - 交叉重排模型 **bge-ranker** [下载bge-ranker](https://huggingface.co/BAAI/bge-reranker-v2-m3/tree/main)
+   - 请自行下载并存放在项目根目录新建的 `models` 文件夹中。
+
+   - **MinerU 多模态解析模型自动下载**: 
+     一键跨平台下载脚本。
+   - **操作步骤**: 直接在项目根目录下运行（无需手动激活虚拟环境）：
+     ```bash
+     python download_minerU.py
+     ```
+   - **自动化逻辑**: 
+     - **自动识别**: 脚本会自动检测并进入根目录下的 `venv_gemma` 虚拟环境。
+     - **自愈检查**: 自动校验 `torch` 等 GPU 加速库是否正确安装，自动安装相关依赖包。
+     - **加速下载**: 自动调用 **清华镜像源 (TUNA)** 极速安装下载器，模型将下载至 `models/minerU` 目录下。
+   - **⚠️ 注意**: 运行前请**关闭全局代理/梯子**，否则 ModelScope 可能会因网络策略导致下载失败。
+
+---
+
 ## 🐍 环境隔离部署 (Dual-Environment Isolation)
 
 为了彻底解决 **MinerU (视觉解析)** 与 **Gemma 4 (业务逻辑)** 之间复杂的底层依赖冲突，本项目采用了**双虚拟环境并行架构**：
@@ -98,6 +127,17 @@ docker-compose up -d
 cd docker_yaml/serxng_docker
 docker-compose up -d
 ```
+
+> **⚠️ SearXNG 核心配置修改说明**:
+> 在通过 `docker-compose up -d` 首次启动 SearXNG 后，系统会在同级目录下生成一个 `searxng` 文件夹。为了确保 Agent 能够通过 API 获取结构化的搜索数据，请打开并编辑 `docker_yaml/serxng_docker/searxng/settings.yml` 文件。
+> 找到 `search` 节点下的 `formats` 配置，并在其中手动加上 `- json`：
+> ```yaml
+> search:
+>   formats:
+>     - html
+>     - json  # 👈 必须加上这一行
+> ```
+> 保存文件后，请重启 SearXNG 容器使配置生效。
 
 ---
 
