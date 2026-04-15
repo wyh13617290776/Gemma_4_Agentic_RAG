@@ -18,6 +18,26 @@
 
 ---
 
+## 🖥️ Windows 前置环境准备 (Windows Prerequisites)
+
+对于 Windows 系统的用户，为了确保 GPU 加速正常运行以及后续 Docker 容器的顺利部署，在开始一切操作之前，请务必确认已安装以下基础运行环境：
+
+1. **CUDA Toolkit (GPU 加速核心)**:
+   - 请先打开终端 (CMD/PowerShell) 输入 `nvidia-smi` 查看您的显卡支持的最高 CUDA 版本（例如我的电脑右上角显示的就是 `CUDA Version: 12.6`）。
+   - 前往 NVIDIA 官网下载对应的安装包（例如对应 12.6 版本下载 `cuda_12.6.0_560.76_windows.exe` [下载](https://developer.nvidia.com/cuda-12-6-0-download-archive)）并完成默认安装。
+2. **WSL2 与 硬件虚拟化 (Hardware Virtualization)**:
+   - **状态自查**：右键任务栏 -> 任务管理器 -> 性能 -> CPU，查看右下角是否显示 **“虚拟化：已启用”**。
+   - **开启方式**：若显示“已禁用”，需重启电脑并进入 BIOS（通常开机按 `F2`、`Del` 或 `F12`）：
+     - **Intel 平台**：找到 `Intel Virtualization Technology` 或 `VT-x`，设为 `Enabled`。
+     - **AMD 平台**：找到 `SVM Mode` 或 `Secure Virtual Machine`，设为 `Enabled`。
+   - **系统安装**：在管理员权限终端运行 `wsl --install`。安装后必须**重启电脑**。
+   - **疑难排解**：如遇 `0x800701bc` 等报错，请手动安装内核更新包（例如 `wsl.2.6.3.0.x64.msi` [下载](https://github.com/microsoft/WSL/releases/tag/2.6.3)）。
+3. **Docker Desktop**:
+   - 负责运行后续的 Milvus 向量数据库和 SearXNG 检索工具。
+   - 下载并安装 `Docker Desktop for Windows-x86_64` [下载](https://docs.docker.com/desktop/setup/install/windows-install/)，安装完成后请在软件设置 (Settings) 中确认已勾选 "Use the WSL 2 based engine" (Windows11 家庭版会默认勾选)。
+
+---
+
 ## 📦 模型与核心引擎准备 (Models & Core Engines)
 
 在启动环境部署之前，请务必完成以下核心组件的下载与放置：
