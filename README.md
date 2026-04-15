@@ -139,7 +139,10 @@ docker-compose up -d
 > ```
 > 保存文件后，请重启 SearXNG 容器使配置生效。
 > 重启命令：
-> ```bash cd docker_yaml/serxng_docker docker-compose restart searxng```
+> ```bash 
+> cd docker_yaml/serxng_docker 
+> docker-compose restart searxng
+>```
 
 ---
 
