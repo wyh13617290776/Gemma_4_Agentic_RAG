@@ -122,27 +122,27 @@ docker-compose up -d
 ```
 
 ### 2、url获取工具 (SearXNG)
-联网检索时第一步获取url的工具。
+负责处理无追踪的本地联网搜索服务。
 ```bash
 cd docker_yaml/serxng_docker
 docker-compose up -d
 ```
 
 > **⚠️ SearXNG 核心配置修改说明**:
-> 在通过 `docker-compose up -d` 首次启动 SearXNG 后，系统会在同级目录下生成一个 `searxng` 文件夹。为了确保 Agent 能够通过 API 获取结构化的搜索数据，请打开并编辑 `docker_yaml/serxng_docker/searxng/settings.yml` 文件。
-> 找到 `search` 节点下的 `formats` 配置，并在其中手动加上 `- json`：
-> ```yaml
-> search:
->   formats:
->     - html
->     - json  # 👈 必须加上这一行
-> ```
-> 保存文件后，请重启 SearXNG 容器使配置生效。
-> 重启命令：
-> ```bash 
-> cd docker_yaml/serxng_docker 
-> docker-compose restart searxng
->```
+> 在通过 `docker-compose up -d` 首次启动 SearXNG 后，系统会在同级目录下生成一个 `searxng` 文件夹。为了确保 Agent 能够通过 API 获取结构化的搜索数据，请务必执行以下步骤：
+> 
+> 1. 编辑配置文件 `docker_yaml/serxng_docker/searxng/settings.yml`。
+> 2. 找到 `search` 节点下的 `formats` 配置，并在其中手动加上 `- json`：
+>    ```yaml
+>    search:
+>      formats:
+>        - html
+>        - json  # 👈 必须加上这一行
+>    ```
+> 3. **执行重启命令使配置生效**:
+>    ```bash
+>    docker-compose restart searxng
+>    ```
 
 ---
 
