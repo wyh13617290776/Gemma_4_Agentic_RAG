@@ -95,7 +95,7 @@ docker-compose up -d
 ### 2、url获取工具 (SearXNG)
 联网检索时第一步获取url的工具。
 ```bash
-cd ../serxng_docker
+cd docker_yaml/serxng_docker
 docker-compose up -d
 ```
 
