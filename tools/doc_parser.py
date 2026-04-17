@@ -20,35 +20,44 @@ from llama_index.core import Document
 from llama_index.core.node_parser import SentenceWindowNodeParser
 
 import pickle
+import logging
+import gc
+
+logger = logging.getLogger("AgenticRAG")
 
 # ==========================================================
-# 👑 引入本地 OCR 引擎 (全矩阵旗舰版：精准适配 v1.0.5 规范)
+# 视觉解析依赖检测
 # ==========================================================
+# 全局绝对不实例化任何模型，只检查依赖是否就绪
 try:
     from rapidocr_onnxruntime import RapidOCR
-    # 👑 核心修复：不要 import ModelType，只要 RapidTableInput 即可
     from rapid_table import RapidTable, RapidTableInput
-    
-    # 1. 初始化纯文字扫描器
-    ocr_engine = RapidOCR()
-    
-    # 2. 核心修复：1.0.5 版本直接留空括号，它会自动默认使用最顶级的 slanet_plus 模型！
-    table_config = RapidTableInput() 
-    table_engine = RapidTable(table_config)
-    
     HAS_OCR = True
-    print("✅ RapidOCR + RapidTable (v1.0.5) 联合引擎挂载成功！")
+    logger.info("✅ 视觉解析组件 (RapidOCR/Table) 依赖正常")
 except Exception as e:
     HAS_OCR = False
-    print(f"⚠️ Rapid 引擎挂载失败：{e}")
-
+    logger.warning(f"⚠️ 视觉解析组件未完整安装: {e}")
+    
 def extract_table_with_ocr(image_path):
     """
     终极版：提取文字，并完美重组为 HTML 表格格式！
     """
     if not HAS_OCR or not os.path.exists(image_path):
         return ""
+    
+    ocr_engine = None
+    table_engine = None
+
     try:
+        # 临时向系统申请内存拉起引擎
+        logger.info(f"👁️ 侦测到复杂图片表格，正在临时向系统申请内存启动 Rapid 引擎...")
+
+        # 1. 临时初始化纯文字扫描器
+        ocr_engine = RapidOCR()
+        # 2. 临时初始化表格重组器 (1.0.5 规范)
+        table_config = RapidTableInput() 
+        table_engine = RapidTable(table_config)
+        
         # 第一步：硬核文字扫描 (拿到坐标点位和文字)
         ocr_result, _ = ocr_engine(image_path)
         
@@ -76,6 +85,16 @@ def extract_table_with_ocr(image_path):
     except Exception as e:
         print(f"❌ RapidTable 重组表格失败: {e}")
         return ""
+    
+    finally:
+        # 强制销毁实例，触发垃圾回收
+        if ocr_engine is not None:
+            del ocr_engine
+        if table_engine is not None:
+            del table_engine
+            
+        gc.collect() # 物理清空 RAM
+        logger.info("♻️ 解析完毕，Rapid 引擎实例已销毁，内存已归还系统。")
 # ==========================================================
 
 # 👑 1. 初始化滑动窗口切分器 (大块包含前后各3句，小块是单句)
@@ -212,7 +231,7 @@ def process_and_embed_documents(uploaded_files):
             
             for i, file in enumerate(files_to_process):
                 # 释放上一轮的 BGE 显存，确保解析引擎有充足空间
-                EmbeddingService.unload()
+                EmbeddingService.unload(reason="immediate")
 
                 # 👑 生成当前文件的精确上传时间 (格式: YYYY-MM-DD HH:MM:SS)
                 current_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -362,7 +381,7 @@ def process_and_embed_documents(uploaded_files):
             # ---------------------------------------------------------
             # 3. 完美退场，恢复对话环境
             # ---------------------------------------------------------
-            status.update(label="正在重启对话大模型服务 (这可能需要几秒钟)...", state="running")
-            EmbeddingService.load(device="cuda") 
+            status.update(label="正在释放解析引擎显存，准备重启对话大模型...", state="running")
+            EmbeddingService.unload(reason="immediate")
+            # 在极其干净的显存环境中，安全点火拉起大语言模型
             HardwareManager.start_llm_service()
-            status.update(label="全部处理完毕！系统已恢复对话模式，可以关闭此窗口。", state="complete", expanded=False)

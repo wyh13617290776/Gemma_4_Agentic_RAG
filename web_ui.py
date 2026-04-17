@@ -9,6 +9,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import streamlit as st
+import logging
 import os
 # 核心魔法：强行劫持该进程内所有的 Hugging Face 请求到国内高速镜像站
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
@@ -52,6 +53,22 @@ from core.multimodal_engine import MultimodalEngine
 load_dotenv()
 
 # ==========================================
+# 全局日志中心 (Logger) 初始化
+# ==========================================
+# 配置标准日志格式
+logging.basicConfig(
+    level=logging.INFO,  # 设定基础日志级别
+    format="%(asctime)s - 🚀 %(levelname)s - %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(), # 默认输出到控制台
+        # logging.FileHandler("agent_system.log", encoding="utf-8") # 取消注释此行，即可自动把日志写入文件！
+    ]
+)
+logger = logging.getLogger("AgenticRAG")
+logger.info("系统日志模块初始化完毕。")
+
+# ==========================================
 # 全局算力锁与缓存单例
 # ==========================================
 @st.cache_resource
@@ -65,6 +82,21 @@ def get_web_retriever():
     """全局缓存联网检索器，避免反复初始化浏览器内核"""
     return UltimateWebRetriever()
 web_retriever = get_web_retriever()
+
+# =========================================================
+# 资源生命周期看门狗 (后台静默运行)
+# =========================================================
+@st.fragment(run_every=60) # 每 60 秒检查一次
+def memory_lifecycle_watchdog():
+    # 设定空闲回收阈值，例如 5 分钟 (300秒)
+    IDLE_THRESHOLD = 300 
+    if EmbeddingService._is_loaded:
+        idle_duration = EmbeddingService.get_idle_time()
+        if idle_duration > IDLE_THRESHOLD:
+            EmbeddingService.unload()
+            st.toast("💡 系统进入节能模式：长时间未操作，向量引擎显存已自动释放。", icon="♻️")
+# 在页面顶部调用，让它启动
+memory_lifecycle_watchdog()
 
 # ==========================================
 # 页面基础配置与 CSS 注入
@@ -155,9 +187,10 @@ def validate_local_environment_modal(server_info, cfg):
         status_text.success("✅ 本地模型环境安检通过！引擎准备就绪。")
         # 记录通过状态
         st.session_state["env_check_passed"] = True
-        # 给用户一个手动确认的按钮，点击后弹窗关闭
-        if st.button("🚀 启动本地引擎", use_container_width=True, type="primary"):
-            st.rerun()
+        # 自动重启本地模型服务
+        # 去掉原先的手动按钮，给用户 1.5 秒的视觉确认时间，然后自动重载整个页面关闭弹窗
+        time.sleep(1.5)
+        st.rerun()
     else:
         status_text.error("❌ 本地模型缺失组件，无法启动！")
         st.error(f"缺失清单：{', '.join(missing_deps)}")
@@ -367,7 +400,7 @@ def render_dashboard():
                                 st.rerun()
                             else:
                                 st.session_state['llm_started_this_session'] = True
-                                st.toast("检测到大模型未启动，正在自动点火...", icon="🚀")
+                                st.toast("正在启动本地模型服务...", icon="🚀")
                                 try:
                                     HardwareManager.start_llm_service()
                                     # 死等逻辑
@@ -384,11 +417,6 @@ def render_dashboard():
                                 except Exception as e:
                                     st.session_state['llm_started_this_session'] = False
                                     st.error(f"启动异常: {e}")
-
-                # 自动加载向量库
-                if "system_initialized" not in st.session_state:
-                    EmbeddingService.load(device="cuda")
-                    st.session_state['system_initialized'] = True
                 
                 # 3. 核心修复：本地监控雷达被严格隔离在放行区内！
                 # 这样未安检时就绝对看不到那个带蓝框的“服务已离线”提示了。
@@ -407,12 +435,6 @@ def render_dashboard():
                 with st.spinner("♻️ 检测到切换至云端，正在强杀本地进程以释放显存..."):
                     HardwareManager.stop_llm_service()
                     st.toast("本地引擎已关闭，显存已释放", icon="♻️")
-            
-            # 确保向量引擎始终可用
-            if "system_initialized" not in st.session_state:
-                with st.spinner("装载本地向量检索引擎中..."):
-                    EmbeddingService.load(device="cuda")
-                    st.session_state["system_initialized"] = True
 
             st.session_state['llm_started_this_session'] = False
             
@@ -449,12 +471,21 @@ orchestrator = GraphOrchestrator(router, rag_engine, web_retriever)
 # ==========================================
 @st.dialog("🗂️ 上传文件并入库", width="large")
 def upload_file_dialog():
-    """渲染文件上传弹窗，接收文件并交由底层 Parser 处理后存入 Milvus"""
     st.markdown("上传文档或代码，系统将自动进行【智能分流解析】并入库。")
     supported_formats = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "py", "json"]
-    uploaded_files = st.file_uploader("拖拽文件到此处，或点击上传", type=supported_formats, accept_multiple_files=True)
+    uploaded_files = st.file_uploader("拖拽文件到此处", type=supported_formats, accept_multiple_files=True)
+    
     if st.button("🚀 开始解析并入库", use_container_width=True):
-        process_and_embed_documents(uploaded_files)
+        try:
+            # 动作前：装载或刷新 Embedding 模型的存活时间
+            EmbeddingService.load(device="cuda")
+            # 执行解析
+            process_and_embed_documents(uploaded_files)
+            st.success("解析入库完成！系统已恢复对话模式，您可以关闭此弹窗开始提问。")
+        except Exception as e:
+            # 失败立即释放显存
+            EmbeddingService.unload(reason="immediate")
+            st.error(f"入库失败: {e}")
 
 
 # ==========================================
@@ -748,6 +779,11 @@ if audio_bytes is not None:
 
 # 当用户敲击回车 或 录制完新语音时触发全链路
 if user_prompt or voice_triggered:
+    # 智能唤醒
+    # 只要用户开始说话，就确保 Embedding 模型在内存中，如果之前被释放了则会自动重装
+    with st.spinner("🧠 正在唤醒本地知识库引擎..."):
+        EmbeddingService.load(device="cuda")
+
     # 节点 3：逻辑终极卫兵
     # 如果安检未通过，强制拦截本次执行，防止代码流向 LLMGateway 导致崩溃
     if st.session_state.get("disable_chat_input", False):
