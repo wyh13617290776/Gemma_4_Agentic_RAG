@@ -3,6 +3,8 @@ import numpy as np
 import asyncio
 import logging
 
+import gc
+
 # 获取全局日志记录器
 logger = logging.getLogger("AgenticRAG")
 
