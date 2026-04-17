@@ -3,108 +3,145 @@ import yaml
 import json
 from dotenv import load_dotenv
 
-# 动态获取项目根目录，彻底告别相对路径报错
+# 1. 动态获取项目根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# 自动加载项目根目录下的 .env 文件
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-# 精准定位 config 文件夹下的配置文件
+# 2. 精准定位 config 文件夹下的所有配置文件
 CONFIG_PATH = os.path.join(BASE_DIR, "config", "config.yaml")
 SECRETS_PATH = os.path.join(BASE_DIR, "config", "secrets.yaml")
 PROMPTS_PATH = os.path.join(BASE_DIR, "config", "prompts.json")
 TOOLS_PATH = os.path.join(BASE_DIR, "config", "tools.json")
 
+# 新增：收拢模型路由与任务模板路径
+ROUTER_PATH = os.path.join(BASE_DIR, "config", "model_router.yaml")
+TASKS_PATH = os.path.join(BASE_DIR, "config", "llm_tasks.yaml")
+
 def load_yaml_safe(path):
-    """👑 安全加载 YAML 的辅助函数：如果文件不存在，不会报错退出，而是返回空字典"""
+    """安全加载 YAML"""
     if not os.path.exists(path):
-        print(f"⚠️ 提示: 配置文件未找到 -> {path}")
         return {}
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
-def load_config():
-    # 1. 分别安全读取主配置和私密配置
-    main_cfg = load_yaml_safe(CONFIG_PATH)
-    secrets_cfg = load_yaml_safe(SECRETS_PATH)
+def load_all_configs():
+    """一次性解析所有配置文件，并完成环境治理"""
+    config = load_yaml_safe(CONFIG_PATH)
+    secrets = load_yaml_safe(SECRETS_PATH)
+    router = load_yaml_safe(ROUTER_PATH)
+    tasks = load_yaml_safe(TASKS_PATH)
     
-    # 2. 👑 核心魔法：将 secrets 里的配置覆盖/合并到主配置中
-    config = main_cfg.copy()
-    config.update(secrets_cfg)
-
-    # ==========================================
-    # 2. 环境变量 ( .env ) 强制覆盖逻辑
-    # ==========================================
-    
-    # [A] 覆盖 API Keys
-    if "api_keys" not in config: 
-        config["api_keys"] = {}
-    for key in ["SERPER_API_KEY", "TAVILY_API_KEY", "EXA_API_KEY"]:
+    # [A] 密钥合并与环境覆盖
+    config.update(secrets)
+    if "api_keys" not in config: config["api_keys"] = {}
+    for key in ["SERPER_API_KEY", "TAVILY_API_KEY", "EXA_API_KEY", "SILICONFLOW_API_KEY", "DASHSCOPE_API_KEY"]:
         env_val = os.getenv(key)
-        if env_val:  # 只有当 .env 中填了值，才覆盖 yaml 里的空值
-            config["api_keys"][key.lower()] = env_val
+        if env_val: config["api_keys"][key.lower()] = env_val
 
-    # [B] 覆盖 网络代理配置
-    if "network" not in config: 
-        config["network"] = {}
-        
+    # [B] 代理配置覆盖
+    if "network" not in config: config["network"] = {}
     proxy_url = os.getenv("PROXY_URL")
-    # 注意：这里用 is not None，是为了允许用户在 .env 中写 PROXY_URL="" 来强制清空代理
-    if proxy_url is not None:
-        config["network"]["proxy_url"] = proxy_url
+    if proxy_url is not None: config["network"]["proxy_url"] = proxy_url
 
-    no_proxy = os.getenv("NO_PROXY")
-    if no_proxy:
-        config["network"]["no_proxy"] = no_proxy
-
-    # [C] 覆盖 运行端口配置 (预留扩展)
-    if "server" not in config:
-        config["server"] = {}
-    port = os.getenv("STREAMLIT_SERVER_PORT")
-    if port:
-        config["server"]["port"] = port
-
-    # 👑 核心修复：将 server_exe_path 加入自动补全列表
+    # [C] 路径自动化补全逻辑
     path_fields = [
-        (['llm_server', 'model_path']),
-        (['llm_server', 'mmproj_path']),
-        (['llm_server', 'server_exe_path']),
-        (['rag', 'reranker', 'model_path']),
-        (['embedding', 'model_path']),
-        (['mineru', 'exe_path'])
+        (['llm_server', 'model_path']), (['llm_server', 'mmproj_path']),
+        (['llm_server', 'server_exe_path']), (['rag', 'reranker', 'model_path']),
+        (['embedding', 'model_path']), (['mineru', 'exe_path'])
     ]
-
     for path_map in path_fields:
         curr = config
-        for key in path_map[:-1]:
-            curr = curr.get(key, {})
-        
+        for key in path_map[:-1]: curr = curr.get(key, {})
         last_key = path_map[-1]
         raw_path = curr.get(last_key)
-
-        # 自动将相对路径拼接为基于项目根目录的绝对路径
         if raw_path and not os.path.isabs(raw_path):
             curr[last_key] = os.path.join(BASE_DIR, raw_path).replace("\\", "/")
 
-    # 3. 读取现有的 JSON 配置
+    # [D] 读取 JSON
     with open(PROMPTS_PATH, "r", encoding="utf-8") as f:
         prompts = json.load(f)
     with open(TOOLS_PATH, "r", encoding="utf-8") as f:
         tools = json.load(f)
         
-    return config, prompts, tools
+    return config, router, tasks, prompts, tools
 
-def save_config(current_cfg):
-    """👑 新增：将内存中的最新配置固化保存到本地 config.yaml 中"""
-    # 安全屏障：读取当前的私钥配置，在保存时将私钥字段剥离，防止密钥被意外泄露到主配置文件中
+# 🚀 全局变量暴露
+CFG, ROUTER, TASKS, PROMPTS, TOOLS = load_all_configs()
+
+# ==========================================
+# 3. 统一配置管理接口
+# ==========================================
+
+def get_model_generation_params(model_name):
+    """
+    核心继承逻辑：获取当前模型的最优生成参数
+    优先级：model_router(专属微调) > llm_tasks(系列模板) > config(全局默认)
+    """
+    # 1. 初始化全局默认值
+    final_params = {
+        "temperature": CFG.get("llm_generation", {}).get("temperature", 0.7),
+        "top_p": CFG.get("llm_generation", {}).get("top_p", 0.95),
+        "max_tokens": CFG.get("llm_generation", {}).get("max_tokens", 4096),
+        "top_k": CFG.get("llm_generation", {}).get("top_k", 64)
+    }
+
+    model_info = ROUTER.get("models", {}).get(model_name, {})
+    
+    # 2. 尝试从 llm_tasks.yaml 加载系列模板
+    model_type = model_info.get("type", "gemma")
+    category_cfg = TASKS.get(f"llm_chat_{model_type}", {})
+    if category_cfg:
+        final_params.update({
+            "temperature": category_cfg.get("temperature", final_params["temperature"]),
+            "top_p": category_cfg.get("top_p", final_params["top_p"]),
+            "max_tokens": category_cfg.get("max_tokens", final_params["max_tokens"])
+        })
+        if "extra_body" in category_cfg:
+            final_params["top_k"] = category_cfg["extra_body"].get("top_k", final_params["top_k"])
+
+    # 3. 尝试从 model_router.yaml 加载专属微调 (最高优先级)
+    specific_cfg = model_info.get("generation_cfg", {})
+    if specific_cfg:
+        final_params.update(specific_cfg)
+        
+    return final_params
+
+def save_sys_config(current_cfg):
+    """
+    固化系统配置 (RAG, 记忆)
+    此函数会忽略 model_router 中的个性化参数，仅更新全局 config.yaml
+    """
     secrets_cfg = load_yaml_safe(SECRETS_PATH)
     safe_cfg = current_cfg.copy()
+    # 1. 过滤掉密钥信息
     for key in secrets_cfg.keys():
-        if key in safe_cfg:
-            del safe_cfg[key]
-            
+        if key in safe_cfg: del safe_cfg[key]
+    # 2. 写入文件 (此时 CFG["rag"] 和 CFG["memory"] 已经是 UI 最新的值)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(safe_cfg, f, sort_keys=False, allow_unicode=True)
 
-# 模块加载时自动解析并暴露出这三个全局变量
-CFG, PROMPTS, TOOLS = load_config()
+def save_model_override(model_name, new_params):
+    """
+    👑 修复：防止并发冲突导致的文件损坏
+    不再直接 dump 全局变量，而是先从硬盘拉取最新状态进行合并
+    """
+    # 1. 物理读取当前硬盘上的最新文件，确保基准数据准确
+    fresh_router = load_yaml_safe(ROUTER_PATH) 
+    
+    # 2. 严谨校验结构，防止写入空数据
+    if "models" not in fresh_router: fresh_router["models"] = {}
+    if not model_name: return # 防御性编程：防止 model_name 为空导致产生空白项
+    
+    if model_name not in fresh_router["models"]: 
+        fresh_router["models"][model_name] = {}
+    
+    # 3. 仅更新生成参数部分
+    fresh_router["models"][model_name]["generation_cfg"] = new_params
+    
+    # 4. 执行写盘操作 (建议增加 flush 确保写入完整)
+    with open(ROUTER_PATH, "w", encoding="utf-8") as f:
+        yaml.dump(fresh_router, f, sort_keys=False, allow_unicode=True)
+        
+    # 5. 👑 关键：手动同步更新内存中的全局变量，让所有 Session 立即看到新配置
+    global ROUTER
+    ROUTER = fresh_router

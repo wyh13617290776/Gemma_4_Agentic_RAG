@@ -57,13 +57,6 @@ class RAGPipeline:
         self.rerank_top_k = CFG["rag"]["retrieval"]["rerank_top_k"]
         self.reranker_model_path = CFG["rag"]["reranker"]["model_path"]
         self.reranker_use_fp16 = CFG["rag"]["reranker"]["use_fp16"]
-        
-        # 引擎自带客户端，用于 Query 拆解重写
-        self.client = OpenAI(
-            base_url=f"http://{CFG['llm_server']['host']}:{CFG['llm_server']['port']}/v1", 
-            api_key="sk-local",
-            http_client=httpx.Client(proxy=None, trust_env=False)
-        )
 
     # ==========================================
     # RAG 引擎执行器：不再自己做提纯，直接接收外部的纯净弹药
