@@ -37,7 +37,7 @@ class UltimateWebRetriever:
 
     def __init__(self):
         """
-        初始化检索器，从 CFG (由 config.yaml 和 secrets.yaml 合并) 加载所有 API Key。
+        初始化检索器，从 CFG (由 config.yaml 和 .env 合并) 加载所有 API Key。
         初始化直连 Session 以彻底规避系统代理导致的 SSL/Proxy 错误。
         """
         api_keys = CFG.get("api_keys", {})
@@ -296,24 +296,24 @@ class UltimateWebRetriever:
         而是通过“质量门禁”与“饱和度监测”动态调度不同成本的检索方案。
 
         执行逻辑：
-        1. 弹药整合：将战略中枢提纯后的子查询列表拼接为全局检索关键词。
+        1. 弹药整合：将战略中枢提取后的子查询列表拼接为全局检索关键词。
         2. 先锋抓取：使用 self.searxng_max_results 获取网址，并通过 Crawl4AI 异步脱水。
         3. 质量与去重审查 (核心)：
            - 防短/防毒/防跑题：通过 evaluate_quality 拦截反爬提示或低信息密度网页。
            - 增量去重防内卷：通过 is_redundant 拦截高度雷同的新闻通稿。
         4. 精准破盾：针对 Crawl4AI 失败的 URL 调用 Tavily Extract，破盾后同样需经过质量审查。
-        5. 饱和度反思 I：通过 is_saturated 评估有效情报数。若匮乏，触发 Tavily Search 商业补偿。
-        6. 饱和度反思 II：若情报依然未达阈值，动用 Exa 执行最终的语义降维打击。
+        5. 饱和度反思 I：通过 is_saturated 评估有效信息数。若匮乏，触发 Tavily Search 商业补偿。
+        6. 饱和度反思 II：若信息依然未达阈值，动用 Exa 执行最终的语义降维打击。
 
         Args:
-            sub_queries (list): 战略中枢提纯后的核心关键词列表。
+            sub_queries (list): 战略中枢提取后的核心关键词列表。
             max_results (int): (已废弃，被 yaml 中的阶梯配置接管) 仅为保持接口签名的兼容性。
             
         Returns:
-            str: 经过高度提纯、去重并组合了多路级联来源的 Markdown 格式参考资料。
+            str: 经过高度提取、去重并组合了多路级联来源的 Markdown 格式参考资料。
         """
         search_query = " ".join(sub_queries)
-        logger.info(f"🌟 启动全链路级联检索, 提纯词: '{search_query}'")
+        logger.info(f"🌟 启动全链路级联检索, 提取词: '{search_query}'")
         
         successful_contents = []
 
@@ -388,14 +388,14 @@ class UltimateWebRetriever:
             
             if exa_content and isinstance(exa_content, str):
                 successful_contents.append(f"\n--- 💣 Exa 语义检索结果 ---\n{exa_content}")
-                logger.info("✅ Exa 深度语义情报注入完成")
+                logger.info("✅ Exa 深度语义信息注入完成")
 
         # -----------------------------------------------------
         # 最终汇总
         # -----------------------------------------------------
         final_count = len(successful_contents)
         if final_count > 0:
-            logger.info(f"🏁 全链路级联检索完成，共获取 {final_count} 组有效情报模块")
+            logger.info(f"🏁 全链路级联检索完成，共获取 {final_count} 组有效信息模块")
             return "\n\n".join(successful_contents)
         else:
             logger.info("❌ 级联检索全线溃败：未获取到任何有效内容")
@@ -424,7 +424,7 @@ class UltimateWebRetriever:
         results = t_data.get('results')
         if not results or not isinstance(results, list) or len(results) == 0:
             logger.warning("⚠️ Tavily 请求成功，但未搜索到任何结果")
-            return "已连接外网，但未搜索到与关键词相关的公开信息。"
+            return "已连接网络，但未搜索到与关键词相关的公开信息。"
         
         # 👑 防护装甲 2：安全地从字典中取值
         valid_contents = []

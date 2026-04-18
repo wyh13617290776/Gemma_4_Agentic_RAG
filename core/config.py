@@ -9,7 +9,6 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # 2. 精准定位 config 文件夹下的所有配置文件
 CONFIG_PATH = os.path.join(BASE_DIR, "config", "config.yaml")
-SECRETS_PATH = os.path.join(BASE_DIR, "config", "secrets.yaml")
 PROMPTS_PATH = os.path.join(BASE_DIR, "config", "prompts.json")
 TOOLS_PATH = os.path.join(BASE_DIR, "config", "tools.json")
 
@@ -27,15 +26,14 @@ def load_yaml_safe(path):
 def load_all_configs():
     """一次性解析所有配置文件，并完成环境治理"""
     config = load_yaml_safe(CONFIG_PATH)
-    secrets = load_yaml_safe(SECRETS_PATH)
     router = load_yaml_safe(ROUTER_PATH)
     tasks = load_yaml_safe(TASKS_PATH)
     
-    # [A] 密钥合并与环境覆盖
-    config.update(secrets)
+    # [A] 直接从 .env 环境变量加载密钥
     if "api_keys" not in config: config["api_keys"] = {}
     for key in ["SERPER_API_KEY", "TAVILY_API_KEY", "EXA_API_KEY", "SILICONFLOW_API_KEY", "DASHSCOPE_API_KEY"]:
         env_val = os.getenv(key)
+        # 统一转小写，跟 web_retriever.py 里的 get("exa_api_key") 对齐
         if env_val: config["api_keys"][key.lower()] = env_val
 
     # [B] 代理配置覆盖
@@ -45,7 +43,6 @@ def load_all_configs():
 
     # [C] 路径自动化补全逻辑
     path_fields = [
-        (['llm_server', 'model_path']), (['llm_server', 'mmproj_path']),
         (['llm_server', 'server_exe_path']), (['rag', 'reranker', 'model_path']),
         (['embedding', 'model_path']), (['mineru', 'exe_path'])
     ]
@@ -108,21 +105,20 @@ def get_model_generation_params(model_name):
 
 def save_sys_config(current_cfg):
     """
-    固化系统配置 (RAG, 记忆)
+    保存系统配置 (RAG, 记忆)
     此函数会忽略 model_router 中的个性化参数，仅更新全局 config.yaml
     """
-    secrets_cfg = load_yaml_safe(SECRETS_PATH)
     safe_cfg = current_cfg.copy()
-    # 1. 过滤掉密钥信息
-    for key in secrets_cfg.keys():
-        if key in safe_cfg: del safe_cfg[key]
+    # 1. 保存配置文件前，强行将动态注入的密钥块剔除
+    if "api_keys" in safe_cfg:
+        del safe_cfg["api_keys"]
     # 2. 写入文件 (此时 CFG["rag"] 和 CFG["memory"] 已经是 UI 最新的值)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(safe_cfg, f, sort_keys=False, allow_unicode=True)
 
 def save_model_override(model_name, new_params):
     """
-    👑 修复：防止并发冲突导致的文件损坏
+    防止并发冲突导致的文件损坏
     不再直接 dump 全局变量，而是先从硬盘拉取最新状态进行合并
     """
     # 1. 物理读取当前硬盘上的最新文件，确保基准数据准确

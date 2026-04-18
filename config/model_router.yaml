@@ -2,6 +2,45 @@
 
 default_model: "gemma-4-local"
 
+# =========================================================
+# 全局配置模板 (Base Templates)
+# =========================================================
+
+# --- 硅基流动模板 ---
+.sf_base: &sf_base
+  type: "deepseek"
+  protocol: "openai"
+  base_url: "https://api.siliconflow.cn/v1"
+  key_env: "SILICONFLOW_API_KEY"
+
+.sf_standard: &sf_standard
+  <<: *sf_base
+  adapter: "standard"
+
+.sf_think: &sf_think
+  <<: *sf_base
+  adapter: "deepseek"
+  dynamic_thinking: true
+
+# --- 阿里云模板 ---
+.ali_base: &ali_base
+  type: "qwen"
+  protocol: "openai"
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  key_env: "DASHSCOPE_API_KEY"
+
+.ali_standard: &ali_standard
+  <<: *ali_base
+  adapter: "standard"
+
+.ali_think: &ali_think
+  <<: *ali_base
+  adapter: "deepseek"
+  dynamic_thinking: true
+
+# =========================================================
+# 模型实例映射 (Model Instances)
+# =========================================================
 models:
   # =========================================================
   # Google：本地 Gemma 4 (推理与 RAG 基础)
@@ -17,8 +56,6 @@ models:
       n_gpu_layers: '22'
       n_ctx: '18000'
       n_threads: '16'
-      host: 127.0.0.1
-      port: '8000'
     features:
       enable_thinking: true
       enable_multimodal: true
@@ -35,11 +72,7 @@ models:
   # 1. 硅基流动 - DeepSeek 家族
   # ---------------------------------------------------------
   deepseek-ai/DeepSeek-V3:
-    type: "deepseek"
-    protocol: "openai"
-    base_url: "https://api.siliconflow.cn/v1"
-    key_env: "SILICONFLOW_API_KEY"
-    adapter: "standard"
+    <<: *sf_standard
     generation_cfg:
       temperature: 0.6
       top_p: 0.9
@@ -47,12 +80,7 @@ models:
       top_k: 20
 
   deepseek-ai/DeepSeek-V3.2:
-    type: "deepseek"
-    protocol: "openai"
-    base_url: "https://api.siliconflow.cn/v1"
-    key_env: "SILICONFLOW_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *sf_think
     generation_cfg:
       temperature: 0.6
       top_p: 0.9
@@ -60,11 +88,7 @@ models:
       top_k: 20
 
   deepseek-ai/DeepSeek-R1:
-    type: "deepseek"
-    protocol: "openai"
-    base_url: "https://api.siliconflow.cn/v1"
-    key_env: "SILICONFLOW_API_KEY"
-    adapter: "deepseek"
+    <<: *sf_think
     generation_cfg:
       temperature: 0.6
       top_p: 0.9
@@ -72,15 +96,10 @@ models:
       top_k: 20
   
   # ---------------------------------------------------------
-  # 2. 阿里云 - 千问 Qwen3.6 纯文本系列 (全面支持思考)
+  # 2. 阿里云 - 千问 Qwen3.6 纯文本系列
   # ---------------------------------------------------------
   qwen3.6-flash-2026-04-16:
-    type: "qwen"
-    protocol: "openai"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    key_env: "DASHSCOPE_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *ali_think
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
@@ -88,12 +107,7 @@ models:
       top_k: 50
 
   qwen3.6-35b-a3b:
-    type: "qwen"
-    protocol: "openai"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    key_env: "DASHSCOPE_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *ali_think
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
@@ -101,12 +115,7 @@ models:
       top_k: 50
 
   qwen3.6-plus-2026-04-02:
-    type: "qwen"
-    protocol: "openai"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    key_env: "DASHSCOPE_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *ali_think
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
@@ -114,16 +123,10 @@ models:
       top_k: 50
   
   # ---------------------------------------------------------
-  # 3. 阿里云 - 千问 视觉推理系列
+  # 3. 阿里云 - 千问 视觉推理系列 (Qwen3-VL & QVQ)
   # ---------------------------------------------------------
-  # Qwen3-VL 全系列支持 enable_thinking 混合思考模式
   qwen3-vl-flash-2026-01-22:
-    type: "qwen"
-    protocol: "openai"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    key_env: "DASHSCOPE_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *ali_think
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
@@ -131,12 +134,7 @@ models:
       top_k: 50
 
   qwen3-vl-plus:
-    type: "qwen"
-    protocol: "openai"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    key_env: "DASHSCOPE_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *ali_think
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
@@ -144,28 +142,40 @@ models:
       top_k: 50
 
   qwen3-vl-plus-2025-09-23:
-    type: "qwen"
-    protocol: "openai"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    key_env: "DASHSCOPE_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *ali_think
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
 
-  # 视觉推理专属模型 (解题怪兽)
   qvq-max-2025-03-25:
-    type: "qwen"
-    protocol: "openai"
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    key_env: "DASHSCOPE_API_KEY"
-    adapter: "deepseek"
-    dynamic_thinking: true
+    <<: *ali_think
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
+  
+  # ---------------------------------------------------------
+  # 4. 阿里云 - 千问 Flash 极速池 (用于轻量任务，保持 Standard)
+  # ---------------------------------------------------------
+  qwen-mt-flash:
+    <<: *ali_standard
+    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
+
+  qwen3.6-flash:
+    <<: *ali_standard
+    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
+
+  qwen-flash:
+    <<: *ali_standard
+    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
+
+  qwen-flash-2025-07-28:
+    <<: *ali_standard
+    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
+
+  qwen3.5-flash:
+    <<: *ali_standard
+    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }

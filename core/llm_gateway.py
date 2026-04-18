@@ -6,7 +6,7 @@ from openai import OpenAI
 import streamlit as st
 
 # 👑 核心依赖：从中央配置中心导入解析好的全局变量和路由函数
-from core.config import CFG, ROUTER, TASKS, get_model_generation_params
+from core.config import ROUTER, TASKS, get_model_generation_params
 
 load_dotenv()
 
@@ -92,7 +92,7 @@ class LLMGateway:
         Returns:
             Union[str, object]: 
                 - 如果触发了工具调用，返回 OpenAI Message 对象供上层处理。
-                - 如果是正常回复，返回提纯后的字符串内容 (Dehydrated Content)。
+                - 如果是正常回复，返回提取后的字符串内容 (Dehydrated Content)。
         """
         # 1. 初始化运行时客户端
         client, model_id = self._get_client_and_model()
@@ -132,7 +132,7 @@ class LLMGateway:
         if getattr(message, "tool_calls", None):
             return message
             
-        # 7. 内容提纯：剥离 local_think 产生的内联思考标签
+        # 7. 内容提取：剥离 local_think 产生的内联思考标签
         content = message.content or ""
         if adapter_type == "local_think" and "</think>" in content:
             content = content.split("</think>")[-1].strip()

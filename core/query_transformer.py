@@ -1,6 +1,6 @@
 # core/query_transformer.py
 import json
-from core.config import CFG, PROMPTS
+from core.config import PROMPTS
 from core.llm_gateway import LLMGateway
 
 class QueryTransformer:

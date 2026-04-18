@@ -5,6 +5,8 @@
 # 底层推理框架的物理路径
 llm_server:
   server_exe_path: llama/llama-b8708/llama-server.exe
+  host: 127.0.0.1
+  port: '8000'
 
 # 1. 向量数据库地基 (基础设施)
 milvus:

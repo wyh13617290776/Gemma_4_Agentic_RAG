@@ -23,7 +23,7 @@ def is_port_in_use(port, host='127.0.0.1'):
 
 class HardwareManager:
     LOCAL_SERVER = ROUTER["models"]["gemma-4-local"]["server_info"]
-    PORT = int(LOCAL_SERVER["port"])
+    PORT = int(CFG["llm_server"]["port"])
     
 
     @staticmethod
@@ -36,7 +36,7 @@ class HardwareManager:
             "--ctx-size", str(HardwareManager.LOCAL_SERVER["n_ctx"]),
             "--n-gpu-layers", str(HardwareManager.LOCAL_SERVER["n_gpu_layers"]),
             "--threads", str(HardwareManager.LOCAL_SERVER["n_threads"]),
-            "--host", HardwareManager.LOCAL_SERVER["host"],
+            "--host", CFG["llm_server"]["host"],
             "--port", str(HardwareManager.PORT),
             "--special",  
         ]

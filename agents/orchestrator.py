@@ -7,7 +7,7 @@ from core.config import PROMPTS
 class AgentState:
     """
     状态记忆体 (State Payload)
-    包裹所有情报，在节点间流转。
+    包裹所有信息，在节点间流转。
     """
     def __init__(self, user_query: str, has_media: bool):
         self.user_query = user_query
@@ -61,19 +61,19 @@ class GraphOrchestrator:
                 print("🛡️ [补丁] 探测到强时效性/外部需求，已强制追加 web_search")
 
         # --- 📚 策略 C：本地知识库补偿矩阵 (Local RAG Compensation) ---
-        # 针对提及本地资产或文件的指令进行增强
+        # 针对提及本地资料或文件的指令进行增强
         if "search_knowledge_base" not in state.intents:
             rag_patterns = [
                 # 1. 明确的文件后缀或类型
                 r"(研报|文档|文件|附件|库里|资料|记录|归档|pdf|docx|txt|excel|表格|ppt|简历|合同|数据)",
                 # 2. 空间方位词：内部、本地、我给你的
-                r"(内部|私有|本地|内网|我给你的|之前传的|资产|知识库|自有|规章|流程|标准|规范)",
+                r"(内部|私有|本地|内网|我给你的|之前传的|资料|知识库|自有|规章|流程|标准|规范)",
                 # 3. 处理动作：总结、归纳、针对...
                 r"(提取|总结|归纳|查找|翻一下|看一下|针对上述|基于这些)"
             ]
             if any(re.search(p, query) for p in rag_patterns):
                 state.intents.append("search_knowledge_base")
-                print("🛡️ [补丁] 探测到本地资产引用，已强制追加 search_knowledge_base")
+                print("🛡️ [补丁] 探测到本地资料引用，已强制追加 search_knowledge_base")
 
         # --- 👁️ 策略 D：多模态强制纠偏 (Multimodal Reinforcement) ---
         # 只有在确实存在附件的情况下才触发，防止空载
@@ -102,17 +102,17 @@ class GraphOrchestrator:
             state.intents.remove("chat")
 
         # 3. 参数对齐：如果补丁强制开启了搜索意图，但 parameters 字典是空的
-        # 强制将用户原句设为 search_query，确保后续提纯器能正常工作
+        # 强制将用户原句设为 search_query，确保后续提取器能正常工作
         if any(i in ["search_knowledge_base", "web_search"] for i in state.intents):
             if not state.parameters.get("search_query"):
                 state.parameters["search_query"] = state.user_query if state.user_query.strip() else "综合分析"
 
     # -----------------------------------------------------
-    # 节点 1：路由与提纯 (Route & Transform)
+    # 节点 1：路由与提取 (Route & Transform)
     # -----------------------------------------------------
     async def _node_route_and_transform(self, state: AgentState, enable_web_search: bool):
         """
-        节点：意图路由与关键词提纯
+        节点：意图路由与关键词提取
         """
         # --- 步骤 1：调用大模型进行原始意图分析 ---
         route_result = self.router.analyze_intent(
@@ -127,8 +127,8 @@ class GraphOrchestrator:
         # 这一步是关键，它能救回那些模型判断错误的意图
         self._apply_architect_patch(state, enable_web_search)
 
-        # --- 步骤 3：根据最终确定的意图，启动提纯大脑 ---
-        # 只要存在任何形式的检索需求，就必须进入提纯环节
+        # --- 步骤 3：根据最终确定的意图，启动提取大脑 ---
+        # 只要存在任何形式的检索需求，就必须进入提取环节
         if "search_knowledge_base" in state.intents or "web_search" in state.intents:
             # 这里的 transformer.transform 是异步的，需要 await
             state.sub_queries, state.hyde_passage = await self.transformer.transform(state.user_query)
@@ -137,9 +137,9 @@ class GraphOrchestrator:
             state.sub_queries = [state.user_query]
         
         # --- 步骤 4：UI 播报（此时播报的信息是经过补丁修正后的最准意图） ---
-        st.toast(f"🧩 最终决策链路: {state.intents}")
+        st.toast(f"🧩 最终决策: {state.intents}")
         if "search_knowledge_base" in state.intents or "web_search" in state.intents:
-            st.toast(f"🎯 提纯火力: {' | '.join(state.sub_queries)}")
+            st.toast(f"🎯 提取关键词: {' | '.join(state.sub_queries)}")
             
         return state
 
@@ -186,13 +186,13 @@ class GraphOrchestrator:
                     state.rag_nodes = nodes
                     if context_str:
                         state.system_content_blocks.append(PROMPTS["rag_system_prompt"].format(context_str=context_str))
-                        st.toast("📚 本地资产检索完成", icon="✅")
+                        st.toast("📚 本地资料检索完成", icon="✅")
                 
                 # 分发 Web 结果
                 elif task_names[idx] == "web":
                     if res and "未获取到" not in res:
                         state.system_content_blocks.append(PROMPTS["web_search_system_prompt"].format(web_context=res))
-                        st.toast("🌐 外网情报抓取完成", icon="✅")
+                        st.toast("🌐 网络信息抓取完成", icon="✅")
 
         return state
 

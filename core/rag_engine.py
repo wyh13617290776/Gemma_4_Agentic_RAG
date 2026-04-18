@@ -59,7 +59,7 @@ class RAGPipeline:
         self.reranker_use_fp16 = CFG["rag"]["reranker"]["use_fp16"]
 
     # ==========================================
-    # RAG 引擎执行器：不再自己做提纯，直接接收外部的纯净弹药
+    # RAG 引擎执行器：不再自己做提取，直接接收外部的纯净弹药
     # ==========================================
     def retrieve_and_format(self, search_query: str, sub_queries: list = None, hyde_passage: str = ""):
         # 防止外部传 None

@@ -20,6 +20,7 @@ import time
 import math
 import httpx
 import asyncio
+import json
 from dotenv import load_dotenv
 
 from streamlit.runtime.scriptrunner import add_script_run_ctx
@@ -121,6 +122,15 @@ if "enable_web_search" not in st.session_state:
     st.session_state.enable_web_search = True 
 if "last_audio_hash" not in st.session_state:
     st.session_state.last_audio_hash = None
+
+if "suggested_questions" not in st.session_state:
+    st.session_state.suggested_questions = []
+if "trigger_followup" not in st.session_state:
+    st.session_state.trigger_followup = None
+
+# 新增：Flash 池的轮询指针
+if "flash_model_index" not in st.session_state:
+    st.session_state.flash_model_index = 0
 
 st.title("🪐 Agentic RAG")
 
@@ -335,6 +345,13 @@ def render_dashboard():
     adapter_type = str(model_info.get("adapter", "")).lower().strip()
     supports_thinking = adapter_type in ["deepseek", "local_think"] or bool(model_info.get("dynamic_thinking", False))
     st.session_state["supports_thinking"] = supports_thinking
+
+    # =========================================================
+    # 新增：视觉多模态能力探针 (VLM Probe)
+    # 通过模型名称中的关键词来智能判定是否支持视觉输入
+    # =========================================================
+    is_vlm = any(kw in selected_model.lower() for kw in ["vl", "qvq", "gemma", "vision"])
+    st.session_state["is_vlm"] = is_vlm
     
     if not supports_thinking:
         st.session_state["enable_thinking"] = False
@@ -345,6 +362,19 @@ def render_dashboard():
     if model_changed:
         st.session_state['llm_started_this_session'] = False 
         st.session_state["prev_selected_model"] = selected_model
+
+        # =========================================================
+        # 鲁棒性防呆设计：模型切换时的多模态状态交叉校验
+        # =========================================================
+        # 跨组件通信：通过指定的 Key 偷窥当前 UI 中是否有尚未发送的附件
+        current_media = st.session_state.get(f"media_uploader_{st.session_state.uploader_key}")
+        
+        if current_media:
+            # 如果用户带着图片切换了模型，给出精准的感知反馈
+            if not is_vlm:
+                st.toast(f"⚠️ 切换至纯文本引擎！底部的图像将自动降级为 OCR 模式。", icon="✂️")
+            else:
+                st.toast(f"👁️ 切换至视觉引擎！底部的图像已恢复满血多模态解析能力。", icon="✨")
 
     os.environ["STREAMLIT_ACTIVE_MODEL"] = selected_model
     
@@ -686,7 +716,7 @@ with st.container(border=True):
     cols = st.columns([1.2, 1.2, 1.2, 1.2, 0.8, 2.7])
     
     with cols[0]:
-        if st.button("🗂️ 上传本地资产", use_container_width=True):
+        if st.button("🗂️ 上传本地资料", use_container_width=True):
             upload_file_dialog() 
             
     with cols[1]:
@@ -716,6 +746,9 @@ with st.container(border=True):
             )
             if chat_media:
                 st.success(f"已附加: {chat_media.name}")
+                # 入口处瞬间探针告警
+                if not st.session_state.get("is_vlm", True):
+                    st.toast("⚠️ 当前为纯文本引擎，图像将自动转为 OCR 文字供模型阅读。", icon="✂️")
                 
     with cols[4]:
         # Level 3：录音麦克风集成
@@ -729,7 +762,8 @@ st.divider()
 # ====================================================
 # 历史消息渲染引擎
 # ====================================================
-for message in memory.get_ui_messages():
+ui_messages = memory.get_ui_messages()
+for i, message in enumerate(ui_messages):
     with st.chat_message(message["role"]):
         if message["role"] == "user":
             # 渲染用户端多模态内容
@@ -759,6 +793,37 @@ for message in memory.get_ui_messages():
                 if "```json\n{" in content and "bar_chart" in content.lower():
                     # 未来可以在这里接入 JSON 转换并用 st.plotly_chart 渲染
                     pass
+            
+            # =========================================================
+            # 新增：渲染历史记录中的溯源细节 (紧跟在答案后面)
+            # =========================================================
+            trace_data = message.get("trace_data", [])
+            if trace_data:
+                with st.expander("📚 查看本地知识库溯源细节", expanded=False):
+                    for t in trace_data:
+                        st.markdown(t["title"])
+                        st.markdown(t["score"])
+                        st.markdown(t["content"])
+                        st.divider()
+            
+            # =========================================================
+            # 药丸渲染区：保证在最后面，绝对不丢失
+            # =========================================================
+            # 只有当这是【最后一条】历史消息，且是【助手】发出的，才在底部渲染药丸
+            if i == len(ui_messages) - 1 and st.session_state.get("suggested_questions"):
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                selected_q = st.pills(
+                    label="💡 您可能还想问：", 
+                    options=st.session_state.suggested_questions, 
+                    selection_mode="single",
+                    key=f"pills_history_{st.session_state.uploader_key}"
+                )
+                
+                if selected_q:
+                    st.session_state.trigger_followup = selected_q
+                    st.session_state.suggested_questions = [] # 触发后立刻清空
+                    st.rerun()
 
 # ====================================================
 # 核心对话与处理触发器
@@ -777,10 +842,21 @@ if audio_bytes is not None:
         voice_triggered = True
         st.session_state.last_audio_hash = current_audio_hash
 
+# =========================================================
+# 劫持拦截器 (Highest Priority Override)
+# 如果发现有“推荐问题”的触发标记，强制覆盖上面的输入
+# =========================================================
+if st.session_state.trigger_followup:
+    user_prompt = st.session_state.trigger_followup # 强行注入追问文字
+    st.session_state.trigger_followup = None        # 用完即焚，防止无限循环
+    voice_triggered = False                         # 屏蔽可能的杂音干扰
+
 # 当用户敲击回车 或 录制完新语音时触发全链路
 if user_prompt or voice_triggered:
-    # 智能唤醒
-    # 只要用户开始说话，就确保 Embedding 模型在内存中，如果之前被释放了则会自动重装
+    # 开始新对话前，强制清空上一次的推荐问题
+    st.session_state.suggested_questions = []
+    
+    # 智能唤醒：只要用户开始说话，就确保 Embedding 模型在内存中，如果之前被释放了则会自动重装
     with st.spinner("🧠 正在唤醒本地知识库引擎..."):
         EmbeddingService.load(device="cuda")
 
@@ -846,7 +922,7 @@ if user_prompt or voice_triggered:
             full_user_query = f"{media_context}\n\n【用户针对附件的提问】：{user_prompt}"
         
         # =========================================================
-        # 状态机编排接管：路由 -> 提纯 -> 并发检索 -> 提示词拼装
+        # 状态机编排接管：路由 -> 提取 -> 并发检索 -> 提示词拼装
         # =========================================================
         with st.spinner("🧠 战略主脑已接管：正在执行图结构并发调度..."):
             final_state = asyncio.run(orchestrator.run(
@@ -864,20 +940,34 @@ if user_prompt or voice_triggered:
         if final_system_prompt.strip():
             messages_to_send.insert(0, {"role": "system", "content": final_system_prompt})
         
-        # 多模态数据全局拦截剥离 (防爆显存机制)
-        # 如果当前回合没有任何多模态意图被触发，强制删除 Payload 中的多模态大文件
+        # =========================================================
+        # 多模态数据全局拦截剥离 (防爆显存 & 纯文本模型保护)
+        # =========================================================
         multimodal_intents = {"analyze_image", "analyze_audio", "analyze_video"}
-        if not any(i in multimodal_intents for i in intents):
+        is_current_vlm = st.session_state.get("is_vlm", True)
+        
+        # 触发剥离的条件：
+        # 1. 当前回合没有任何多模态意图被触发 
+        # OR 2. 当前模型根本不支持视觉输入 (强制物理拦截)
+        if not any(i in multimodal_intents for i in intents) or not is_current_vlm:
             stripped_current_media = False
             for msg in messages_to_send:
                 if isinstance(msg["content"], list):
                     original_len = len(msg["content"])
+                    # 强行过滤掉所有非 text 类型的 block (物理级砍掉 image_url)
                     text_only = [item for item in msg["content"] if item["type"] == "text"]
                     msg["content"] = text_only
+                    
                     if msg is messages_to_send[-1] and original_len > len(text_only):
                         stripped_current_media = True
+                        
             if stripped_current_media:
-                st.toast("♻️ 媒体附件与当前意图无关，已在底层剥离以节省 GPU 算力", icon="🍃")
+                if not is_current_vlm:
+                    # 纯文本模型保护触发，发送二次确认弹窗
+                    st.toast("✂️ 底层保护触发：已安全剥离图像源文件，仅发送文本", icon="🛡️")
+                else:
+                    # 常规节省显存触发
+                    st.toast("♻️ 媒体附件与当前意图无关，已在底层剥离以节省 GPU 算力", icon="🍃")
 
         memory.add_assistant_message(thought="", content="")
 
@@ -929,23 +1019,91 @@ if user_prompt or voice_triggered:
                     memory.update_last_message(thought="", content=raw_content)
         
         # ==========================================================
-        # 极简溯源 UI 渲染 (仅针对本地 RAG 召回的数据)
+        # 极简溯源 UI 渲染 & 状态持久化 (必须在生成追问之前！)
         # ==========================================================
         if "search_knowledge_base" in intents and nodes:
+            trace_list = []
+            for i, n in enumerate(nodes):
+                meta = n.node.metadata
+                probability = 1 / (1 + math.exp(-n.score))
+                percentage_score = f"{probability * 100:.1f}%"
+                file_type = meta.get("file_type", "txt").lower()
+                page_info = f"第 {meta.get('page_label', '?')} 页" if file_type == "pdf" else ""
+                
+                trace_list.append({
+                    "title": f"📄 **来源 {i+1}**：{meta.get('file_name', '未知')} ({page_info})",
+                    "score": f"🎯 **语义匹配度**：`{percentage_score}`",
+                    "content": f"> {meta.get('original_text', n.get_content())}"
+                })
+                
+            # 1. 强行注入历史记录，保证刷新页面绝不丢失！
+            if len(st.session_state.messages) > 0:
+                st.session_state.messages[-1]["trace_data"] = trace_list
+
+            # 2. 在当前轮次渲染一次
             with st.expander("📚 查看本地知识库溯源细节", expanded=False):
-                for i, n in enumerate(nodes):
-                    meta = n.node.metadata
-                    # 概率换算: 使用 Sigmoid 函数将原始 Logit 分数映射到 0~1 的置信度
-                    probability = 1 / (1 + math.exp(-n.score))
-                    percentage_score = f"{probability * 100:.1f}%"
-                    
-                    file_type = meta.get("file_type", "txt").lower()
-                    page_info = f"第 {meta.get('page_label', '?')} 页" if file_type == "pdf" else ""
-                    
-                    st.markdown(f"📄 **来源 {i+1}**：{meta.get('file_name', '未知')} ({page_info})")
-                    st.markdown(f"🎯 **语义匹配度**：`{percentage_score}`")
-                    st.markdown(f"> {meta.get('original_text', n.get_content())}")
+                for t in trace_list:
+                    st.markdown(t["title"])
+                    st.markdown(t["score"])
+                    st.markdown(t["content"])
                     st.divider()
+
+        # ==========================================================
+        # 异步生成推荐问题的后端逻辑 (动态发现 + 黑名单过滤 + 轮询)
+        # ==========================================================
+        if raw_content and not st.session_state.get("disable_chat_input", False):
+            try:
+                # 黑名单拦截：硬编码排除那些“伪装成极速模型”的重量级模型
+                excluded_models = {"qwen3.6-flash-2026-04-16", "qwen3-vl-flash-2026-01-22"}
+                
+                # 1. 动态提取池：从 ROUTER 字典中实时筛选，并剔除黑名单
+                flash_pool = [
+                    m_id for m_id, m_info in ROUTER.get("models", {}).items() 
+                    if "flash" in m_id.lower() 
+                    and m_info.get("type") == "qwen"
+                    and m_id not in excluded_models  # 过滤条件
+                ]
+                
+                # 安全阀：如果配置里一个符合条件的 flash 模型都没写
+                if not flash_pool:
+                    logger.warning("⚠️ 警告：未在 model_router.yaml 中发现符合条件的 Qwen Flash 模型")
+                else:
+                    # 2. 获取并校准当前轮询指针
+                    current_idx = st.session_state.get("flash_model_index", 0)
+                    
+                    # 防护补丁：如果用户中途删除了 yaml 里的模型，取模运算能防止 index 越界
+                    current_idx = current_idx % len(flash_pool)
+                    chosen_flash_model = flash_pool[current_idx]
+                    
+                    # 3. 游标推进：实现“一人一次”的绝对公平调度
+                    st.session_state.flash_model_index = (current_idx + 1) % len(flash_pool)
+                    
+                    logger.info(f"动态负载平衡：由配置自动发现的模型 [{chosen_flash_model}] 执行本轮推荐")
+
+                    # 4. 初始化网关并执行调用
+                    fq_gateway = LLMGateway(task_name="generate_followup")
+                    fq_gateway.model_name = chosen_flash_model
+                    
+                    fq_messages = [
+                        {"role": "system", "content": PROMPTS["followup_questions_system"]},
+                        {"role": "user", "content": PROMPTS["followup_questions_user"].format(
+                            user_query=user_prompt,
+                            assistant_reply=raw_content[:800] 
+                        )}
+                    ]
+                    
+                    json_str = fq_gateway.invoke(messages=fq_messages, response_format={"type": "json_object"}, stream=False)
+                    res_data = json.loads(json_str)
+                    
+                    st.session_state.suggested_questions = res_data.get("questions", [])[:4]
+                    
+                    # 5. 瞬间重载，刷新药丸
+                    if st.session_state.suggested_questions:
+                        st.rerun()
+                    
+            except Exception as e:
+                logger.error(f"⚠️ 动态推荐生成静默失败: {e}")
+                st.session_state.suggested_questions = []
 
         # ==============================================================
         # 异步线程：后台静默记忆摘要压缩
