@@ -1,7 +1,7 @@
 """
 =============================================================================
 核心入口文件：Gemma 4 商业级智能知识库 Agent (Web UI)
-功能：前端渲染、多模态输入交互、意图路由分发、流式对话处理、后台静默记忆摘要
+功能：配置中心化管理、模型专属参数自适应、RAG全局调优、多模态流式调度
 =============================================================================
 """
 
@@ -9,30 +9,37 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import streamlit as st
+import logging
 import os
 # 核心魔法：强行劫持该进程内所有的 Hugging Face 请求到国内高速镜像站
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import base64
+import yaml
 import threading
 import time
 import math
 import httpx
-from streamlit.runtime.scriptrunner import add_script_run_ctx
-
-# 引入外部强化 UI 库
-from audio_recorder_streamlit import audio_recorder
-import plotly.graph_objects as go
-
+import asyncio
+import json
 from dotenv import load_dotenv
-from openai import OpenAI
 
-# 优化 PyTorch 显存分配策略，防止 OOM (Out Of Memory) 报错
+from streamlit.runtime.scriptrunner import add_script_run_ctx
+from audio_recorder_streamlit import audio_recorder
+from pymilvus import connections
+
+# 优化 PyTorch 显存分配策略，防止 OOM
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # ==========================================
-# 导入内部核心业务组件
+# 👑 导入内部核心业务组件 (统一配置中心)
 # ==========================================
-from core.config import CFG, PROMPTS, save_config
+from core.config import (
+    CFG, ROUTER, TASKS, PROMPTS, ROUTER_PATH,
+    get_model_generation_params, 
+    save_sys_config, 
+    save_model_override
+)
+from core.llm_gateway import LLMGateway
 from core.hardware import HardwareManager, is_port_in_use
 from core.database import EmbeddingService
 from tools.doc_parser import process_and_embed_documents
@@ -40,61 +47,31 @@ from memory.chat_memory import MemoryManager
 from agents.router import IntentRouter
 from core.rag_engine import RAGPipeline
 from tools.web_retriever import UltimateWebRetriever
-
-import asyncio
-from core.query_transformer import QueryTransformer
-
 from agents.orchestrator import GraphOrchestrator
 from core.multimodal_engine import MultimodalEngine
 
-# 加载环境变量并初始化 OpenAI 兼容客户端
+# 加载环境变量
 load_dotenv()
-client = OpenAI(
-    api_key="sk-local",
-    base_url=f"http://{CFG['llm_server']['host']}:{CFG['llm_server']['port']}/v1", 
-    # 新版 httpx 的终极防代理写法：显式清空代理，强行无视操作系统的 Clash 环境变量
-    http_client=httpx.Client(proxy=None, trust_env=False) 
+
+# ==========================================
+# 全局日志中心 (Logger) 初始化
+# ==========================================
+# 配置标准日志格式
+logging.basicConfig(
+    level=logging.INFO,  # 设定基础日志级别
+    format="%(asctime)s - 🚀 %(levelname)s - %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(), # 默认输出到控制台
+        # logging.FileHandler("agent_system.log", encoding="utf-8") # 取消注释此行，即可自动把日志写入文件！
+    ]
 )
-
-# 页面基础配置：启用宽屏模式，默认展开侧边栏
-st.set_page_config(page_title="Gemma 4 商业级 Agent", page_icon="🪐", layout="wide", initial_sidebar_state="expanded")
-
-def local_css(file_name):
-    """
-    读取外部 CSS 文件并注入到 Streamlit 页面中
-    :param file_name: CSS 文件的路径
-    """
-    with open(file_name, "r", encoding="utf-8") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-# 从外部加载极致美化样式
-style_path = os.path.join("assets", "css", "style.css")
-if os.path.exists(style_path):
-    local_css(style_path)
-else:
-    st.error(f"⚠️ 未找到 CSS 样式文件: {style_path}")
+logger = logging.getLogger("AgenticRAG")
+logger.info("系统日志模块初始化完毕。")
 
 # ==========================================
-# 全局状态与核心单例初始化
+# 全局算力锁与缓存单例
 # ==========================================
-# 文件上传器刷新 Key
-if "uploader_key" not in st.session_state: 
-    st.session_state.uploader_key = 1
-# 深度思考模式状态
-if "enable_thinking" not in st.session_state: 
-    st.session_state.enable_thinking = CFG["gemma_features"].get("enable_thinking", False)
-# 联网搜索模式状态
-if "enable_web_search" not in st.session_state: 
-    st.session_state.enable_web_search = True 
-# 防重复处理录音的标记
-if "last_audio_hash" not in st.session_state:
-    st.session_state.last_audio_hash = None
-
-# 初始化无状态业务组件
-memory = MemoryManager(st.session_state, max_window=CFG["memory"]["max_window"])
-router = IntentRouter()
-rag_engine = RAGPipeline()
-
 @st.cache_resource
 def get_llm_lock():
     """获取全局算力锁，防止并发对话打满 GPU 显存"""
@@ -107,31 +84,447 @@ def get_web_retriever():
     return UltimateWebRetriever()
 web_retriever = get_web_retriever()
 
-multimodal_engine = MultimodalEngine()
+# =========================================================
+# 资源生命周期看门狗 (后台静默运行)
+# =========================================================
+@st.fragment(run_every=60) # 每 60 秒检查一次
+def memory_lifecycle_watchdog():
+    # 设定空闲回收阈值，例如 5 分钟 (300秒)
+    IDLE_THRESHOLD = 300 
+    if EmbeddingService._is_loaded:
+        idle_duration = EmbeddingService.get_idle_time()
+        if idle_duration > IDLE_THRESHOLD:
+            EmbeddingService.unload()
+            st.toast("💡 系统进入节能模式：长时间未操作，向量引擎显存已自动释放。", icon="♻️")
+# 在页面顶部调用，让它启动
+memory_lifecycle_watchdog()
 
+# ==========================================
+# 页面基础配置与 CSS 注入
+# ==========================================
+st.set_page_config(page_title="商业级 Agentic RAG", page_icon="🪐", layout="wide", initial_sidebar_state="expanded")
+
+def local_css(file_name):
+    if os.path.exists(file_name):
+        with open(file_name, "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    else:
+        st.error(f"⚠️ 未找到 CSS 样式文件: {file_name}")
+
+local_css(os.path.join("assets", "css", "style.css"))
+
+# ==========================================
+# 全局状态初始化 (UI 状态机)
+# ==========================================
+if "uploader_key" not in st.session_state: 
+    st.session_state.uploader_key = 1
+if "enable_web_search" not in st.session_state: 
+    st.session_state.enable_web_search = True 
+if "last_audio_hash" not in st.session_state:
+    st.session_state.last_audio_hash = None
+
+if "suggested_questions" not in st.session_state:
+    st.session_state.suggested_questions = []
+if "trigger_followup" not in st.session_state:
+    st.session_state.trigger_followup = None
+
+# 新增：Flash 池的轮询指针
+if "flash_model_index" not in st.session_state:
+    st.session_state.flash_model_index = 0
+
+st.title("🪐 Agentic RAG")
+
+# 加上 @st.dialog 装饰器，它就会变成一个带有灰色背景遮罩的中央弹窗
+@st.dialog("🛡️ 本地模型环境深度安检", width="large")
+def validate_local_environment_modal(server_info, cfg):
+    """屏幕中央弹出的安检模态框"""
+    missing_deps = []
+    
+    # 进度提示
+    status_text = st.empty()
+    progress_bar = st.progress(0)
+    
+    # --- 步骤 1: 检查模型权重与多模态组件 ---
+    status_text.info("📦 正在核验模型权重及多模态组件...")
+    time.sleep(0.5) 
+    progress_bar.progress(20)
+    
+    # 1.1 检查基础大语言模型权重 (.gguf)
+    model_path = server_info.get("model_path", "")
+    if not model_path or not os.path.exists(model_path):
+        missing_deps.append("基础模型权重 (.gguf)")
+    
+    # 1.2 检查多模态视觉权重 (mmproj-*.gguf)
+    mmproj_path = server_info.get("mmproj_path", "")
+    if not mmproj_path or not os.path.exists(mmproj_path):
+        missing_deps.append("多模态视觉权重 (mmproj-*.gguf)")
+    
+    # --- 步骤 2: 探测推理引擎 ---
+    status_text.info("⚙️ 正在递归扫描项目目录寻找 llama-server.exe...")
+    progress_bar.progress(50)
+    
+    search_root = os.getcwd() 
+    found_exe = False
+    found_dlls = False
+    
+    exe_path_from_cfg = cfg.get("llm_server", {}).get("server_exe_path", "")
+    if exe_path_from_cfg and os.path.exists(exe_path_from_cfg):
+        found_exe = True
+        target_dir = os.path.dirname(exe_path_from_cfg)
+        if any(f.lower().endswith(('.dll')) for f in os.listdir(target_dir)):
+            found_dlls = True
+    
+    if not found_exe:
+        for root, dirs, files in os.walk(search_root):
+            if "llama" in root.lower():
+                if "llama-server.exe" in files:
+                    found_exe = True
+                    if any(f.lower().endswith(('.dll')) for f in files):
+                        found_dlls = True
+                    break
+    
+    progress_bar.progress(90)
+    
+    if not found_exe:
+        missing_deps.append("推理核心引擎 (缺少 llama-server.exe)")
+    elif not found_dlls:
+        missing_deps.append("引擎运行依赖 (缺失 *.dll 库文件)")
+
+    progress_bar.progress(100)
+    
+    # --- 步骤 3: 渲染最终结果并控制状态 ---
+    if len(missing_deps) == 0:
+        status_text.success("✅ 本地模型环境安检通过！引擎准备就绪。")
+        # 记录通过状态
+        st.session_state["env_check_passed"] = True
+        # 自动重启本地模型服务
+        # 去掉原先的手动按钮，给用户 1.5 秒的视觉确认时间，然后自动重载整个页面关闭弹窗
+        time.sleep(1.5)
+        st.rerun()
+    else:
+        status_text.error("❌ 本地模型缺失组件，无法启动！")
+        st.error(f"缺失清单：{', '.join(missing_deps)}")
+        st.info("💡 建议：请关闭弹窗，在上方下拉列表中切换至【云端模型】体验。")
+        st.session_state["env_check_passed"] = False
+
+# =========================================================
+# 模块一：定时刷新探针 (仅用于本地硬件监控)
+# =========================================================
+@st.fragment(run_every=5)
+def render_local_monitor(port):
+    if is_port_in_use(port):
+        st.success("💻 运行模式: 本地私有化计算 (服务在线 🟢)")
+        st.markdown("#### 📊 硬件资源实时监控")
+        metrics = HardwareManager.get_system_metrics()
+        col1, col2, col3 = st.columns(3)
+        col1.metric("CPU 占用", f"{metrics['cpu_percent']:.1f}%")
+        col2.metric("系统内存", f"{metrics['ram_percent']:.1f}%")
+        if metrics["has_gpu"]:
+            col3.metric(
+                label=f"显存 (使用: {metrics['vram_used_gb']:.1f}G)", 
+                value=f"{metrics['vram_percent']:.1f}%",
+                delta=f"核心负载: {metrics['gpu_util']}%", 
+                delta_color="off",
+                help="💡 **核心负载 (GPU Utilization)**\n\n表示当前显卡计算核心的忙碌程度：\n\n- **低负载 (0%~10%)**：模型处于待机状态（仅占用显存，未进行计算）。\n- **高负载 (80%~100%)**：引擎正在全速推理生成 Token 或进行多模态降维处理。\n\n*注：显存占用高但核心负载低属于正常待机现象。*"
+            )
+    else:
+        st.error("⚠️ 本地服务已离线 (被手动关闭或崩溃)")
+        if st.button("手动拉起本地模型服务", use_container_width=True):
+            st.session_state['llm_started_this_session'] = False
+            st.rerun()
+
+# 云端 API 连通性探活
+@st.cache_data(ttl=30, show_spinner=False)
+def check_cloud_api_health(protocol, base_url, key_env):
+    api_key = os.getenv(key_env, "")
+    if not api_key or api_key == "sk-dummy" or len(api_key) < 10:
+        return "🔴 API Key 未配置或无效"
+    
+    try:
+        if protocol == "openai":
+            # =========================================================
+            # 针对阿里云，完全模拟官网 SDK 的 POST 调用行为
+            # =========================================================
+            if base_url and "dashscope.aliyuncs.com" in base_url:
+                test_url = f"{base_url.rstrip('/')}/chat/completions"
+                payload = {
+                    "model": "qwen-plus",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1
+                }
+                res = httpx.post(
+                    test_url,
+                    headers={"Authorization": f"Bearer {api_key}"}, 
+                    json=payload
+                )
+            # =========================================================
+            # SiliconFlow：GET 探测
+            # =========================================================
+            else:
+                url = f"{base_url.rstrip('/')}/models" if base_url else "https://api.openai.com/v1/models"
+                res = httpx.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=5.0)
+            
+            # =========================================================
+            # 统一状态码精细化判定
+            # =========================================================
+            if res.status_code == 200:
+                return "🟢 在线 (验证通过)"
+            elif res.status_code == 401:
+                return "🔴 鉴权失败 (Key 错误)"
+            elif res.status_code == 400:
+                return "🟡 参数错误 (HTTP 400)"
+            elif res.status_code == 429:
+                return "🟡 触发限流 (频率过高)"
+            elif res.status_code >= 500:
+                return f"🔴 云端异常 (HTTP {res.status_code})"
+            else:
+                return f"🟡 状态异常 (HTTP {res.status_code})"
+
+    except httpx.ConnectTimeout:
+        return "🔴 连接超时 (请检查网络)"
+    except httpx.ConnectError:
+        return "🔴 网络不可达 (请检查代理或域名)"
+    except Exception as e:
+        return f"🔴 探测异常 ({str(e)[:20]}...)"
+        
+    return "⚪ 状态未知"
+
+# =========================================================
+# 模块二：主调度台与模型自动联动引擎
+# =========================================================
+def render_dashboard():
+    # 1. 获取原始模型列表
+    raw_models = list(ROUTER.get("models", {}).keys())
+    default_model = ROUTER.get("default_model", "gemma-4-local")
+    
+    # 2. 获取当前应该处于激活状态的模型
+    current_active = st.session_state.get("STREAMLIT_ACTIVE_MODEL", default_model)
+
+    # ============================================================
+    # 动态置顶策略 (Dynamic Top-Pinning)
+    # 将当前选中的模型强行抽取并插入到列表的最顶部
+    # 效果：打开下拉框时永远不需要长跨度滚动，彻底粉碎底层 DOM 卸载的白屏 Bug
+    # ============================================================
+    if current_active in raw_models:
+        raw_models.remove(current_active)
+        raw_models.insert(0, current_active)
+
+    if "STREAMLIT_ACTIVE_MODEL" not in st.session_state:
+        st.session_state["STREAMLIT_ACTIVE_MODEL"] = default_model
+    
+    # 图标格式化钩子
+    def format_model_label(model_id):
+        if not model_id: return "⚠️ 未知模型"
+        is_local = "127.0.0.1" in ROUTER.get("models", {}).get(model_id, {}).get("base_url", "")
+        return f"💻 {model_id}" if is_local else f"☁️ {model_id}"
+    
+    # 核心下拉框直接在页面顶部渲染
+    selected_model = st.selectbox(
+        "当前激活的大模型：", 
+        options=raw_models,               # 传入经过动态置顶处理的列表
+        format_func=format_model_label,
+        key="STREAMLIT_ACTIVE_MODEL"
+    )
+
+    model_info = ROUTER["models"].get(selected_model, {})
+    model_changed = selected_model != st.session_state.get("prev_selected_model", "")
+
+    # --- 核心联动：模型自适应参数与能力判定 ---
+    if "last_synced_model" not in st.session_state or st.session_state.last_synced_model != selected_model:
+        m_params = get_model_generation_params(selected_model)
+        st.session_state["cur_temp"] = float(m_params.get("temperature", 1.0))
+        st.session_state["cur_top_p"] = float(m_params.get("top_p", 0.95))
+        st.session_state["cur_top_k"] = int(m_params.get("top_k", 64))
+        st.session_state["cur_max_tokens"] = int(m_params.get("max_tokens", 4096))
+        
+        m_features = model_info.get("features", {})
+        st.session_state["enable_multimodal"] = m_features.get("enable_multimodal", True)
+        st.session_state.last_synced_model = selected_model
+
+    # C. 深度思考能力探针 
+    adapter_type = str(model_info.get("adapter", "")).lower().strip()
+    supports_thinking = adapter_type in ["deepseek", "local_think"] or bool(model_info.get("dynamic_thinking", False))
+    st.session_state["supports_thinking"] = supports_thinking
+
+    # =========================================================
+    # 新增：视觉多模态能力探针 (VLM Probe)
+    # 通过模型名称中的关键词来智能判定是否支持视觉输入
+    # =========================================================
+    is_vlm = any(kw in selected_model.lower() for kw in ["vl", "qvq", "gemma", "vision"])
+    st.session_state["is_vlm"] = is_vlm
+    
+    if not supports_thinking:
+        st.session_state["enable_thinking"] = False
+    elif model_changed:
+        st.session_state["enable_thinking"] = model_info.get("features", {}).get("enable_thinking", True)
+
+    # 运行模式自检 (本地/云端)
+    if model_changed:
+        st.session_state['llm_started_this_session'] = False 
+        st.session_state["prev_selected_model"] = selected_model
+
+        # =========================================================
+        # 鲁棒性防呆设计：模型切换时的多模态状态交叉校验
+        # =========================================================
+        # 跨组件通信：通过指定的 Key 偷窥当前 UI 中是否有尚未发送的附件
+        current_media = st.session_state.get(f"media_uploader_{st.session_state.uploader_key}")
+        
+        if current_media:
+            # 如果用户带着图片切换了模型，给出精准的感知反馈
+            if not is_vlm:
+                st.toast(f"⚠️ 切换至纯文本引擎！底部的图像将自动降级为 OCR 模式。", icon="✂️")
+            else:
+                st.toast(f"👁️ 切换至视觉引擎！底部的图像已恢复满血多模态解析能力。", icon="✨")
+
+    os.environ["STREAMLIT_ACTIVE_MODEL"] = selected_model
+    
+    server_info = model_info.get("server_info", {})
+    port = int(server_info.get("port", 8000))
+    is_local_mode = "127.0.0.1" in model_info.get("base_url", "") or "localhost" in model_info.get("base_url", "") or model_info.get("key_env") == "NONE"
+
+    # ==============================================================
+    # 折叠面板移到最下面，仅用于包裹硬件状态和探活日志
+    # ==============================================================
+    with st.expander("⚙️ 核心引擎调度与硬件监控面板", expanded=False):
+        if is_local_mode:
+            # 节点1：主动检测与弹窗触发
+            # 👑 核心关卡：读取安检状态
+            is_env_ready = st.session_state.get("env_check_passed", False)
+            
+            # ==========================================================
+            # 🛑 拦截区：未通过安检
+            # ==========================================================
+            if not is_env_ready:
+                st.warning("⚠️ 本地模型环境尚未通过安检，暂时无法使用。")
+                st.session_state["disable_chat_input"] = True
+
+                # 自动触发弹窗逻辑
+                if not st.session_state.get("auto_check_triggered", False):
+                    st.session_state["auto_check_triggered"] = True
+                    validate_local_environment_modal(server_info, CFG)
+                
+                # 手动触发按钮
+                if st.button("🛡️ 立即开始环境深度安检", use_container_width=True, type="primary"):
+                    validate_local_environment_modal(server_info, CFG)
+                
+                # 🛑 核心修复：在此处物理退出函数
+                # 只要安检没过，下面的 HardwareManager 和 render_local_monitor 永远不会被执行
+                return
+            
+            # ==========================================================
+            # 🟢 放行区：安检已通过
+            # ==========================================================
+            else:
+                # 🟢 环境已通过安检，确保输入框解锁，执行原有逻辑
+                st.session_state["disable_chat_input"] = False
+
+                # 1. 安全点火逻辑
+                is_online = is_port_in_use(port)
+                if not is_online and not st.session_state.get('llm_started_this_session', False):
+                    with st.spinner("🚀 检测到本地模式已启用，正在自动点火拉起引擎..."):
+                        # 获取线程锁
+                        with llm_lock: 
+                            # 双重检查锁 (Double-Checked Locking)
+                            if is_port_in_use(port):
+                                st.session_state['llm_started_this_session'] = True
+                                st.rerun()
+                            else:
+                                st.session_state['llm_started_this_session'] = True
+                                st.toast("正在启动本地模型服务...", icon="🚀")
+                                try:
+                                    HardwareManager.start_llm_service()
+                                    # 死等逻辑
+                                    timeout = 30
+                                    while not is_port_in_use(port) and timeout > 0:
+                                        time.sleep(1)
+                                        timeout -= 1
+                                    if timeout > 0:
+                                        st.toast("大模型点火成功！", icon="🔥")
+                                        st.rerun() 
+                                    else:
+                                        st.session_state['llm_started_this_session'] = False
+                                        st.error("启动超时，请检查控制台。")
+                                except Exception as e:
+                                    st.session_state['llm_started_this_session'] = False
+                                    st.error(f"启动异常: {e}")
+                
+                # 3. 核心修复：本地监控雷达被严格隔离在放行区内！
+                # 这样未安检时就绝对看不到那个带蓝框的“服务已离线”提示了。
+                # 调用被精准剥离的 5 秒刷新组件
+                render_local_monitor(port)
+        
+        # ==========================================================
+        # ☁️ 云端模式处理区
+        # ==========================================================
+        else:
+            # 只要用户切到云端模型，立刻解除聊天框的锁定状态
+            st.session_state["disable_chat_input"] = False
+
+            st.info(f"☁️ 运行模式: 云端 API ({selected_model})")
+            if is_port_in_use(port):
+                with st.spinner("♻️ 检测到切换至云端，正在强杀本地进程以释放显存..."):
+                    HardwareManager.stop_llm_service()
+                    st.toast("本地引擎已关闭，显存已释放", icon="♻️")
+
+            st.session_state['llm_started_this_session'] = False
+            
+            st.markdown("#### 📊 引擎状态")
+            # 核心修复：云端连通性缓存机制 (中央控制)
+            health_cache_key = f"api_health_{selected_model}"
+            
+            # 只有当：1. 发生了模型切换  或者 2. 缓存里还没测过这个模型 时，才去真实发 HTTP 请求
+            if model_changed or health_cache_key not in st.session_state:
+                with st.spinner("📡 正在探测云端连通性..."):
+                    status_text = check_cloud_api_health(
+                        protocol=model_info.get("protocol"),
+                        base_url=model_info.get("base_url"),
+                        key_env=model_info.get("key_env")
+                    )
+                    st.session_state[health_cache_key] = status_text
+            
+            st.metric("云端连通性", st.session_state[health_cache_key])
+
+# 渲染顶部折叠面板
+render_dashboard()
+
+# ==========================================
+# 业务组件初始化
+# ==========================================
+memory = MemoryManager(st.session_state, max_window=CFG["memory"]["max_window"])
+router = IntentRouter()
+rag_engine = RAGPipeline()
+multimodal_engine = MultimodalEngine()
 orchestrator = GraphOrchestrator(router, rag_engine, web_retriever)
 
 # ==========================================
-# 弹窗逻辑：文件上传与解析工作流
+# 辅助弹窗
 # ==========================================
 @st.dialog("🗂️ 上传文件并入库", width="large")
 def upload_file_dialog():
-    """渲染文件上传弹窗，接收文件并交由底层 Parser 处理后存入 Milvus"""
     st.markdown("上传文档或代码，系统将自动进行【智能分流解析】并入库。")
     supported_formats = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "py", "json"]
-    uploaded_files = st.file_uploader("拖拽文件到此处，或点击上传", type=supported_formats, accept_multiple_files=True)
+    uploaded_files = st.file_uploader("拖拽文件到此处", type=supported_formats, accept_multiple_files=True)
     
     if st.button("🚀 开始解析并入库", use_container_width=True):
-        process_and_embed_documents(uploaded_files)
+        try:
+            # 动作前：装载或刷新 Embedding 模型的存活时间
+            EmbeddingService.load(device="cuda")
+            # 执行解析
+            process_and_embed_documents(uploaded_files)
+            st.success("解析入库完成！系统已恢复对话模式，您可以关闭此弹窗开始提问。")
+        except Exception as e:
+            # 失败立即释放显存
+            EmbeddingService.unload(reason="immediate")
+            st.error(f"入库失败: {e}")
 
 
 # ==========================================
-# Level 1：侧边栏与多会话管理
+# 侧边栏：多会话与参数调优面板
 # ==========================================
 with st.sidebar:
     # 顶部 Logo 与系统名称
     st.image("assets/logo.svg", width=50)
-    st.markdown("### Gemma 4 工作台")
+    st.markdown("### 工作台")
     
     # 开启新会话逻辑：清空历史消息和摘要
     if st.button("➕ 开启新会话", use_container_width=True, type="primary"):
@@ -141,51 +534,63 @@ with st.sidebar:
         
     st.divider()
     
-    # ---------------------------------------------------------
-    # 控制面板 1：生成参数 (Generation)
-    # ---------------------------------------------------------
-    st.markdown("#### ⚙️ 大模型生成参数")
+    # --- 控制面板 1：模型专属微调 ---
+    active_m = st.session_state.get("STREAMLIT_ACTIVE_MODEL", "gemma-4-local")
+    st.markdown(f"#### ⚙️ {active_m} 生成参数")
     
-    # 温度：决定发散程度，Slider 最直观
-    CFG["llm_generation"]["temperature"] = st.slider(
+    st.session_state["cur_temp"] = st.slider(
         "模型发散度 (Temperature)", 
-        min_value=0.0, max_value=2.0, 
-        value=float(CFG["llm_generation"].get("temperature", 1.0)), 
-        step=0.1,
-        help="推荐 1.0。值越高，回答越有创意；值越低，回答越严谨、机械。"
+        0.0, 2.0, st.session_state.get("cur_temp", 1.0), 0.1,
+        help="推荐 1.0。值越高回答越有创意；值越低越严谨。"
     )
-    
-    # 最大 Token：阶梯式选择，Select Slider 最合适
-    CFG["llm_generation"]["max_tokens"] = st.select_slider(
+    st.session_state["cur_max_tokens"] = st.select_slider(
         "最大输出长度 (Max Tokens)", 
         options=[1024, 2048, 4096, 8192], 
-        value=CFG["llm_generation"].get("max_tokens", 4096)
+        value=st.session_state.get("cur_max_tokens", 4096)
     )
 
-    # 展开的高级生成参数
     with st.expander("🔬 高级采样控制", expanded=False):
-        # Top-P 截断
-        CFG["llm_generation"]["top_p"] = st.slider(
+        # 保留 Top-P 的帮助按钮
+        st.session_state["cur_top_p"] = st.slider(
             "Top-P (核采样)", 
-            min_value=0.1, max_value=1.0, 
-            value=float(CFG["llm_generation"].get("top_p", 0.95)), 
-            step=0.05,
-            help="核采样阈值。例如设为 0.8，意味着模型只会从累计概率达到 80% 的候选词中做选择。值越低回答越死板/确定，值越高越有创造性。通常不建议与 Temperature 同时大幅修改。"
+            0.1, 1.0, st.session_state.get("cur_top_p", 0.95), 0.05,
+            help="核采样阈值。值越低回答越死板，值越高越有创造性。"
         )
-        # Top-K：数字输入框更精准
-        CFG["llm_generation"]["top_k"] = st.number_input(
+        # 保留 Top-K 的帮助按钮
+        st.session_state["cur_top_k"] = st.number_input(
             "Top-K", 
-            min_value=1, max_value=100, 
-            value=int(CFG["llm_generation"].get("top_k", 64)), 
-            step=1,
-            help="绝对截断。强行限制模型每一步只能在概率最高的 K 个词汇中挑选。把这个值调低（比如 10），可以极其有效地防止模型产生幻觉或胡言乱语。"
+            1, 100, st.session_state.get("cur_top_k", 64), 1,
+            help="绝对截断。限制模型每一步只能在概率最高的 K 个词汇中挑选。"
         )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🔄 加载模板", use_container_width=True, help="载入官方推荐参数"):
+            m_type = ROUTER.get("models", {}).get(active_m, {}).get("type", "gemma")
+            template = TASKS.get(f"llm_chat_{m_type}", {})
+            if template:
+                st.session_state["cur_temp"] = float(template.get("temperature", 1.0))
+                st.session_state["cur_top_p"] = float(template.get("top_p", 0.95))
+                st.session_state["cur_max_tokens"] = int(template.get("max_tokens", 4096))
+                if "extra_body" in template: st.session_state["cur_top_k"] = int(template["extra_body"].get("top_k", 64))
+                st.toast(f"✅ 已加载 {m_type} 系列推荐模板", icon="🔄")
+                st.rerun()
+
+    with c2:
+        if st.button("💾 保存配置", use_container_width=True, type="primary"):
+            # 仅保存当前模型的专属微调
+            c_params = {
+                "temperature": st.session_state["cur_temp"],
+                "top_p": st.session_state["cur_top_p"],
+                "top_k": st.session_state["cur_top_k"],
+                "max_tokens": st.session_state["cur_max_tokens"]
+            }
+            save_model_override(active_m, c_params)
+            st.success(f"✅ {active_m} 专属配置已固化")
 
     st.divider()
     
-    # ---------------------------------------------------------
-    # 控制面板 2：RAG 引擎深度调优 (已合并知识浓度控制)
-    # ---------------------------------------------------------
+    # --- 控制面板 2：系统全局基础设施 ---
     st.markdown("#### 🔍 RAG 引擎调优")
     
     # 第一层：检索与重排规模 (并排显示，节省空间)
@@ -218,9 +623,6 @@ with st.sidebar:
     
     st.divider()
 
-    # ---------------------------------------------------------
-    # 控制面板 4：记忆管家引擎 (Memory)
-    # ---------------------------------------------------------
     st.markdown("#### 🧠 记忆流控阈值")
     
     CFG["memory"]["max_window"] = st.slider(
@@ -240,117 +642,90 @@ with st.sidebar:
     )
 
     st.divider()
-    
-    # ---------------------------------------------------------
-    # 控制面板 3：多模态全局开关
-    # ---------------------------------------------------------
     st.markdown("#### 👁️ 多模态特性")
-    # 使用 Toggle 开关控制
-    CFG["gemma_features"]["enable_multimodal"] = st.toggle(
+    st.session_state["enable_multimodal"] = st.toggle(
         "开启图像/音视频解析", 
-        value=CFG["gemma_features"].get("enable_multimodal", True),
+        value=st.session_state.get("enable_multimodal", True),
         help="关闭后，系统将拒绝解析所有附件，可节省显存并加快推理。"
     )
     
     st.divider()
-    
-    # 💾 固化配置按钮
-    if st.button("💾 将当前参数保存为默认", use_container_width=True):
+
+    # 此按钮专门保存 RAG 和 记忆 参数
+    if st.button("💾 保存RAG和Memory参数", use_container_width=True):
         try:
-            save_config(CFG)
-            st.success("✅ 配置已永久保存至 config.yaml！")
+            save_sys_config(CFG)
+            st.success("✅ RAG 引擎与记忆流控参数已保存至 config.yaml")
         except Exception as e:
             st.error(f"❌ 保存失败: {e}")
-    
-    # ---------------------------------------------------------
-    # 实时系统状态探活雷达 (严谨 HTTP 业务监控版)
-    # ---------------------------------------------------------
-    st.caption("实时系统状态：")
-    
-    # 核心防御：TTL 缓存。限制每 3 秒最多只真正发一次请求，绝不阻塞 UI
-    @st.cache_data(ttl=3, show_spinner=False)
-    def check_llm_health(host, port):
-        """HTTP 业务层探活：不仅端口要通，服务还必须正常响应 200"""
-        try:
-            # 访问 OpenAI 兼容接口的 /v1/models 端点
-            url = f"http://{host}:{port}/v1/models"
-            # timeout=0.5 秒，足够本地或局域网响应了
-            response = httpx.get(url, timeout=0.5)
-            return response.status_code == 200
-        except Exception:
-            return False
+            
+    # --- 状态雷达 ---
+    @st.fragment(run_every=3)
+    def render_health_radar():
+        st.caption("实时系统状态：")
+        active_model = st.session_state.get("STREAMLIT_ACTIVE_MODEL", "gemma-4-local")
+        s_info = ROUTER["models"].get(active_model, {}).get("server_info", {})
+        port = int(s_info.get("port", 8000))
+        llm_host = s_info.get("host", "127.0.0.1")
 
-    @st.cache_data(ttl=5, show_spinner=False)
-    def check_milvus_health(url):
-        """Milvus 业务探活"""
-        try:
-            from pymilvus import connections
-            # 尝试建立短链接测试，如果能连上说明服务健康
-            connections.connect(alias="health_check", uri=url, timeout=0.5)
-            connections.disconnect("health_check")
-            return True
-        except Exception:
-            return False
+        @st.cache_data(ttl=3, show_spinner=False)
+        def check_llm_health(host, p):
+            """HTTP 业务层探活：不仅端口要通，服务还必须正常响应 200"""
+            try:
+                url = f"http://{host}:{p}/v1/models"
+                response = httpx.get(url, timeout=0.5)
+                return response.status_code == 200
+            except Exception:
+                return False
 
-    # 1. 验证大模型
-    llm_host = CFG['llm_server']['host']
-    llm_port = CFG['llm_server']['port']
-    if check_llm_health(llm_host, llm_port):
-        st.success("🟢 推理引擎在线")
-    else:
-        st.error("🔴 推理引擎异常，请检查控制台日志！")
+        @st.cache_data(ttl=5, show_spinner=False)
+        def check_milvus_health(url):
+            """Milvus 业务探活"""
+            try:
+                connections.connect(alias="health_check", uri=url, timeout=0.5)
+                connections.disconnect("health_check")
+                return True
+            except Exception:
+                return False
         
-    # 2. 验证 Milvus
-    if check_milvus_health(CFG["milvus"]["uri"]):
-        st.info("🟢 Milvus 向量库连通")
-    else:
-        st.error("🔴 Milvus 库失联，请检查 Docker 服务！")
-
-# ==========================================
-# 主界面：环境自检与启动
-# ==========================================
-if "system_initialized" not in st.session_state:
-    with st.spinner("系统初始化中... 正在装载底层环境 (初次启动可能需要十几秒)..."):
-        with llm_lock:
-            llm_port = HardwareManager.PORT
-            # 检测本地大模型服务端口是否存活
-            if not is_port_in_use(llm_port):
-                st.toast("检测到大模型未启动，正在自动点火拉起引擎...", icon="🚀")
-                HardwareManager.start_llm_service()
-                
-                # 死等大模型真正绑定端口，最多等待 30 秒
-                timeout = 30
-                while not is_port_in_use(llm_port) and timeout > 0:
-                    time.sleep(1)
-                    timeout -= 1
-                    
-                if timeout <= 0:
-                    st.error("❌ 大模型拉起超时，请检查控制台日志！")
-                else:
-                    st.toast("大模型点火成功！", icon="🔥")
+        is_local = "127.0.0.1" in ROUTER["models"].get(active_model, {}).get("base_url", "")
+        if is_local:
+            if check_llm_health(llm_host, port):
+                st.success("🟢 本地推理引擎在线")
             else:
-                st.toast("大模型引擎已在线，系统就绪！", icon="✅")
-                
-            # 拉起 BGE 向量化模型
-            EmbeddingService.load(device="cuda")
-        st.session_state.system_initialized = True
+                st.error("🔴 本地推理引擎离线")
+        else:
+            status_text = st.session_state.get(f"api_health_{active_model}", "⚪ 状态未知")
+            if "🟢" in status_text:
+                st.success(f"🟢 云端在线 ({active_model})")
+            else:
+                st.warning(f"🔴 云端异常: {status_text.replace('🔴 ', '')}")
 
-st.title("🪐 Gemma 4 E4B")
+        if check_milvus_health(CFG["milvus"]["uri"]):
+            st.info("🟢 Milvus 向量库连通")
+        else:
+            st.error("🔴 Milvus 库失联，请检查 Docker")
+    
+    render_health_radar()
+
 
 # ==========================================
 # 交互组件区 (上传、思考、联网、附件、语音)
 # ==========================================
 with st.container(border=True):
-    # 调整为 6 列，完美塞入语音组件
     cols = st.columns([1.2, 1.2, 1.2, 1.2, 0.8, 2.7])
     
     with cols[0]:
-        if st.button("🗂️ 上传本地资产", use_container_width=True):
+        if st.button("🗂️ 上传本地资料", use_container_width=True):
             upload_file_dialog() 
             
     with cols[1]:
-        btn_type = "primary" if st.session_state.enable_thinking else "secondary"
-        if st.button("🧠 深度思考", type=btn_type, use_container_width=True):
+        # 👑 核心自适应：动态禁用/启用“深度思考”按钮
+        can_think = st.session_state.get("supports_thinking", False)
+        btn_type = "primary" if st.session_state.get("enable_thinking", False) else "secondary"
+        help_text = "开启/关闭深度思考过程展示" if can_think else "⚠️ 当前选择的大模型不支持深度思考"
+        
+        if st.button("🧠 深度思考", type=btn_type, use_container_width=True, disabled=not can_think, help=help_text):
             st.session_state.enable_thinking = not st.session_state.enable_thinking
             st.rerun()
             
@@ -371,13 +746,15 @@ with st.container(border=True):
             )
             if chat_media:
                 st.success(f"已附加: {chat_media.name}")
+                # 入口处瞬间探针告警
+                if not st.session_state.get("is_vlm", True):
+                    st.toast("⚠️ 当前为纯文本引擎，图像将自动转为 OCR 文字供模型阅读。", icon="✂️")
                 
     with cols[4]:
         # Level 3：录音麦克风集成
         audio_bytes = audio_recorder(text="", icon_size="2x", icon_name="microphone", key="voice_recorder")
         
     with cols[5]:
-        # 提示文案垂直居中对齐
         st.markdown("<div style='margin-top: 10px; color: #808495; font-size: 0.85em;'>💡 提示：点击左侧麦克风可直接发送语音指令。</div>", unsafe_allow_html=True)
 
 st.divider() 
@@ -385,7 +762,8 @@ st.divider()
 # ====================================================
 # 历史消息渲染引擎
 # ====================================================
-for message in memory.get_ui_messages():
+ui_messages = memory.get_ui_messages()
+for i, message in enumerate(ui_messages):
     with st.chat_message(message["role"]):
         if message["role"] == "user":
             # 渲染用户端多模态内容
@@ -411,16 +789,50 @@ for message in memory.get_ui_messages():
             if content.strip():
                 st.markdown(content)
                 
-                # Level 2: 拦截 JSON 数据渲染 Echarts/Plotly 的钩子预留
+                # 拦截 JSON 数据渲染 Echarts/Plotly 的钩子预留
                 if "```json\n{" in content and "bar_chart" in content.lower():
                     # 未来可以在这里接入 JSON 转换并用 st.plotly_chart 渲染
                     pass
-
+            
+            # =========================================================
+            # 新增：渲染历史记录中的溯源细节 (紧跟在答案后面)
+            # =========================================================
+            trace_data = message.get("trace_data", [])
+            if trace_data:
+                with st.expander("📚 查看本地知识库溯源细节", expanded=False):
+                    for t in trace_data:
+                        st.markdown(t["title"])
+                        st.markdown(t["score"])
+                        st.markdown(t["content"])
+                        st.divider()
+            
+            # =========================================================
+            # 药丸渲染区：保证在最后面，绝对不丢失
+            # =========================================================
+            # 只有当这是【最后一条】历史消息，且是【助手】发出的，才在底部渲染药丸
+            if i == len(ui_messages) - 1 and st.session_state.get("suggested_questions"):
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                selected_q = st.pills(
+                    label="💡 您可能还想问：", 
+                    options=st.session_state.suggested_questions, 
+                    selection_mode="single",
+                    key=f"pills_history_{st.session_state.uploader_key}"
+                )
+                
+                if selected_q:
+                    st.session_state.trigger_followup = selected_q
+                    st.session_state.suggested_questions = [] # 触发后立刻清空
+                    st.rerun()
 
 # ====================================================
 # 核心对话与处理触发器
 # ====================================================
-user_prompt = st.chat_input("请向您的知识库提问：")
+# 节点 2：UI 视觉锁定
+# 从全局状态机获取锁定标识
+is_locked = st.session_state.get("disable_chat_input", False)
+placeholder = "⚠️ 请先完成本地模型安检或切换云端模型" if is_locked else "请向您的知识库提问："
+user_prompt = st.chat_input(placeholder, disabled=is_locked)
 
 # 检查是否触发了新的语音录制 (防重复哈希校验)
 voice_triggered = False
@@ -430,8 +842,30 @@ if audio_bytes is not None:
         voice_triggered = True
         st.session_state.last_audio_hash = current_audio_hash
 
+# =========================================================
+# 劫持拦截器 (Highest Priority Override)
+# 如果发现有“推荐问题”的触发标记，强制覆盖上面的输入
+# =========================================================
+if st.session_state.trigger_followup:
+    user_prompt = st.session_state.trigger_followup # 强行注入追问文字
+    st.session_state.trigger_followup = None        # 用完即焚，防止无限循环
+    voice_triggered = False                         # 屏蔽可能的杂音干扰
+
 # 当用户敲击回车 或 录制完新语音时触发全链路
 if user_prompt or voice_triggered:
+    # 开始新对话前，强制清空上一次的推荐问题
+    st.session_state.suggested_questions = []
+    
+    # 智能唤醒：只要用户开始说话，就确保 Embedding 模型在内存中，如果之前被释放了则会自动重装
+    with st.spinner("🧠 正在唤醒本地知识库引擎..."):
+        EmbeddingService.load(device="cuda")
+
+    # 节点 3：逻辑终极卫兵
+    # 如果安检未通过，强制拦截本次执行，防止代码流向 LLMGateway 导致崩溃
+    if st.session_state.get("disable_chat_input", False):
+        st.error("操作被拦截：本地模型环境未就绪，请先执行安检或更换模型。")
+        st.stop() # 立即停止当前脚本运行
+
     user_content = []
     has_media = False
     
@@ -443,8 +877,8 @@ if user_prompt or voice_triggered:
         if not user_prompt:
             user_prompt = "请仔细听这段录音，并结合我的其他指令进行解答。"
         has_media = True
-        
-    # 其次处理上传的文件附件
+
+    # 处理上传的文件附件
     elif chat_media is not None:
         bytes_data = chat_media.getvalue()
         base64_data = base64.b64encode(bytes_data).decode('utf-8')
@@ -459,7 +893,6 @@ if user_prompt or voice_triggered:
             user_content.append({"type": "video", "video": f"data:{mime_type};base64,{base64_data}"})
         
         has_media = True
-        # 刷新上传框
         st.session_state.uploader_key += 1
     
     # 组合最终的用户 Payload 存入记忆
@@ -472,43 +905,33 @@ if user_prompt or voice_triggered:
         if voice_triggered: st.caption("🎤 附带实时语音指令")
         st.markdown(user_prompt)
 
-    # ====================================================
-    # 后端大模型流式响应处理
-    # ====================================================
     with st.chat_message("assistant"):
-        use_thinking_for_this_turn = st.session_state.enable_thinking
+        # 提取当前真正是否使用思考的标识
+        use_thinking_for_this_turn = st.session_state.get("enable_thinking", False) and st.session_state.get("supports_thinking", False)
         messages_to_send = memory.get_llm_payload(user_content)
 
-        # =========================================================
-        # 阶段零：本地 RapidOCR 物理脱水 (Media Dehydration)
-        # =========================================================
         media_context = ""
-        if chat_media: # 或者是 uploaded_files，看你 UI 里怎么存的
-            with st.spinner("👁️ 正在启动 RapidOCR 视觉前置信息提取..."):
-                # 注意：引擎要求传入 list 格式
+        if chat_media and st.session_state.get("enable_multimodal", True): 
+            with st.spinner("👁️ 正在启动视觉前置信息提取..."):
                 media_context = asyncio.run(multimodal_engine.process_files([chat_media]))
-                if media_context:
-                    st.toast("✅ 视觉特征脱水完成！", icon="👁️")
-
-        # 将脱水文本与用户原话强行绑定，给状态机注入“上帝视角”
+                if media_context: st.toast("✅ 视觉特征提取完成！", icon="👁️")
+        
+        # 将提取的文本与用户原话强行绑定，给状态机注入“上帝视角”
         full_user_query = user_prompt
         if media_context:
             full_user_query = f"{media_context}\n\n【用户针对附件的提问】：{user_prompt}"
         
         # =========================================================
-        # 🚀 状态机编排接管：路由 -> 提纯 -> 并发检索 -> 提示词拼装
+        # 状态机编排接管：路由 -> 提取 -> 并发检索 -> 提示词拼装
         # =========================================================
         with st.spinner("🧠 战略主脑已接管：正在执行图结构并发调度..."):
-            # 一键流转状态机
             final_state = asyncio.run(orchestrator.run(
-                user_query=full_user_query, # 传给它融合了 OCR 的巨型文本
+                user_query=full_user_query, 
                 has_media=has_media, 
                 enable_web_search=st.session_state.enable_web_search
             ))
-            
             intents = final_state.intents
             nodes = final_state.rag_nodes
-                
             # 组合所有的系统提示词块
             system_content = "\n\n".join(final_state.system_content_blocks)
 
@@ -517,38 +940,49 @@ if user_prompt or voice_triggered:
         if final_system_prompt.strip():
             messages_to_send.insert(0, {"role": "system", "content": final_system_prompt})
         
-        # 性能优化：媒体资源全局智能剥离 (防爆显存机制)
-        # 如果当前回合没有任何多模态意图被触发，强制删除 Payload 中的多模态大文件
+        # =========================================================
+        # 多模态数据全局拦截剥离 (防爆显存 & 纯文本模型保护)
+        # =========================================================
         multimodal_intents = {"analyze_image", "analyze_audio", "analyze_video"}
-        if not any(i in multimodal_intents for i in intents):
+        is_current_vlm = st.session_state.get("is_vlm", True)
+        
+        # 触发剥离的条件：
+        # 1. 当前回合没有任何多模态意图被触发 
+        # OR 2. 当前模型根本不支持视觉输入 (强制物理拦截)
+        if not any(i in multimodal_intents for i in intents) or not is_current_vlm:
             stripped_current_media = False
             for msg in messages_to_send:
                 if isinstance(msg["content"], list):
                     original_len = len(msg["content"])
-                    # 仅保留 text 类型的内容
-                    text_only_content = [item for item in msg["content"] if item["type"] == "text"]
-                    msg["content"] = text_only_content
-                    if msg is messages_to_send[-1] and original_len > len(text_only_content):
+                    # 强行过滤掉所有非 text 类型的 block (物理级砍掉 image_url)
+                    text_only = [item for item in msg["content"] if item["type"] == "text"]
+                    msg["content"] = text_only
+                    
+                    if msg is messages_to_send[-1] and original_len > len(text_only):
                         stripped_current_media = True
+                        
             if stripped_current_media:
-                st.toast("♻️ 媒体附件与当前意图无关，已在底层剥离以节省 GPU 算力！", icon="🍃")
+                if not is_current_vlm:
+                    # 纯文本模型保护触发，发送二次确认弹窗
+                    st.toast("✂️ 底层保护触发：已安全剥离图像源文件，仅发送文本", icon="🛡️")
+                else:
+                    # 常规节省显存触发
+                    st.toast("♻️ 媒体附件与当前意图无关，已在底层剥离以节省 GPU 算力", icon="🍃")
 
-        # 初始化 Assistant 回复占位
         memory.add_assistant_message(thought="", content="")
 
         # =========================================================
-        # 🚀 触发大模型生成 (带全局算力锁保护)
+        # 触发大模型生成 (由企业级网关接管，多厂商思维链统一剥离)
         # =========================================================
         with llm_lock:
-            stream = client.chat.completions.create(
-                model="gpt-3.5-turbo", 
+            chat_gateway = LLMGateway(temperature=st.session_state.get("cur_temp"))
+            
+            stream_generator = chat_gateway.stream_invoke(
                 messages=messages_to_send,
-                stream=CFG["llm_generation"]["stream"],
-                temperature=CFG["llm_generation"]["temperature"],
-                top_p=CFG["llm_generation"]["top_p"],
-                max_tokens=CFG["llm_generation"]["max_tokens"],
-                stop=["<turn|>", "<|turn|>", "<eos>", "<end_of_turn>"],
-                extra_body={"top_k": CFG["llm_generation"]["top_k"]}
+                top_p=st.session_state.get("cur_top_p"),
+                max_tokens=st.session_state.get("cur_max_tokens"),
+                extra_body={"top_k": st.session_state.get("cur_top_k")},
+                request_thinking=use_thinking_for_this_turn
             )
             
             # UI 占位符准备
@@ -563,19 +997,10 @@ if user_prompt or voice_triggered:
             raw_content = ""
             thought_completed = False
             
-            # 实时流式解析
-            for chunk in stream:
-                delta = chunk.choices[0].delta
-                
-                # 兼容不同后端的思维链 (Reasoning) 字段
-                reasoning_chunk = getattr(delta, "reasoning_content", None)
-                if not reasoning_chunk and hasattr(delta, "model_extra") and delta.model_extra:
-                    reasoning_chunk = delta.model_extra.get("reasoning_content", "")
-                reasoning_chunk = reasoning_chunk or ""
-                content_chunk = delta.content or ""
-                
-                raw_thought += reasoning_chunk
-                raw_content += content_chunk
+            # 网关吐出的纯净标准数据
+            for chunk_data in stream_generator:
+                raw_thought += chunk_data["reasoning"]
+                raw_content += chunk_data["content"]
                 
                 # 渲染逻辑
                 if use_thinking_for_this_turn:
@@ -594,23 +1019,91 @@ if user_prompt or voice_triggered:
                     memory.update_last_message(thought="", content=raw_content)
         
         # ==========================================================
-        # 极简溯源 UI 渲染 (仅针对本地 RAG 召回的数据)
+        # 极简溯源 UI 渲染 & 状态持久化 (必须在生成追问之前！)
         # ==========================================================
         if "search_knowledge_base" in intents and nodes:
+            trace_list = []
+            for i, n in enumerate(nodes):
+                meta = n.node.metadata
+                probability = 1 / (1 + math.exp(-n.score))
+                percentage_score = f"{probability * 100:.1f}%"
+                file_type = meta.get("file_type", "txt").lower()
+                page_info = f"第 {meta.get('page_label', '?')} 页" if file_type == "pdf" else ""
+                
+                trace_list.append({
+                    "title": f"📄 **来源 {i+1}**：{meta.get('file_name', '未知')} ({page_info})",
+                    "score": f"🎯 **语义匹配度**：`{percentage_score}`",
+                    "content": f"> {meta.get('original_text', n.get_content())}"
+                })
+                
+            # 1. 强行注入历史记录，保证刷新页面绝不丢失！
+            if len(st.session_state.messages) > 0:
+                st.session_state.messages[-1]["trace_data"] = trace_list
+
+            # 2. 在当前轮次渲染一次
             with st.expander("📚 查看本地知识库溯源细节", expanded=False):
-                for i, n in enumerate(nodes):
-                    meta = n.node.metadata
-                    # 概率换算: 使用 Sigmoid 函数将原始 Logit 分数映射到 0~1 的置信度
-                    probability = 1 / (1 + math.exp(-n.score))
-                    percentage_score = f"{probability * 100:.1f}%"
-                    
-                    file_type = meta.get("file_type", "txt").lower()
-                    page_info = f"第 {meta.get('page_label', '?')} 页" if file_type == "pdf" else ""
-                    
-                    st.markdown(f"📄 **来源 {i+1}**：{meta.get('file_name', '未知')} ({page_info})")
-                    st.markdown(f"🎯 **语义匹配度**：`{percentage_score}`")
-                    st.markdown(f"> {meta.get('original_text', n.get_content())}")
+                for t in trace_list:
+                    st.markdown(t["title"])
+                    st.markdown(t["score"])
+                    st.markdown(t["content"])
                     st.divider()
+
+        # ==========================================================
+        # 异步生成推荐问题的后端逻辑 (动态发现 + 黑名单过滤 + 轮询)
+        # ==========================================================
+        if raw_content and not st.session_state.get("disable_chat_input", False):
+            try:
+                # 黑名单拦截：硬编码排除那些“伪装成极速模型”的重量级模型
+                excluded_models = {"qwen3.6-flash-2026-04-16", "qwen3-vl-flash-2026-01-22"}
+                
+                # 1. 动态提取池：从 ROUTER 字典中实时筛选，并剔除黑名单
+                flash_pool = [
+                    m_id for m_id, m_info in ROUTER.get("models", {}).items() 
+                    if "flash" in m_id.lower() 
+                    and m_info.get("type") == "qwen"
+                    and m_id not in excluded_models  # 过滤条件
+                ]
+                
+                # 安全阀：如果配置里一个符合条件的 flash 模型都没写
+                if not flash_pool:
+                    logger.warning("⚠️ 警告：未在 model_router.yaml 中发现符合条件的 Qwen Flash 模型")
+                else:
+                    # 2. 获取并校准当前轮询指针
+                    current_idx = st.session_state.get("flash_model_index", 0)
+                    
+                    # 防护补丁：如果用户中途删除了 yaml 里的模型，取模运算能防止 index 越界
+                    current_idx = current_idx % len(flash_pool)
+                    chosen_flash_model = flash_pool[current_idx]
+                    
+                    # 3. 游标推进：实现“一人一次”的绝对公平调度
+                    st.session_state.flash_model_index = (current_idx + 1) % len(flash_pool)
+                    
+                    logger.info(f"动态负载平衡：由配置自动发现的模型 [{chosen_flash_model}] 执行本轮推荐")
+
+                    # 4. 初始化网关并执行调用
+                    fq_gateway = LLMGateway(task_name="generate_followup")
+                    fq_gateway.model_name = chosen_flash_model
+                    
+                    fq_messages = [
+                        {"role": "system", "content": PROMPTS["followup_questions_system"]},
+                        {"role": "user", "content": PROMPTS["followup_questions_user"].format(
+                            user_query=user_prompt,
+                            assistant_reply=raw_content[:800] 
+                        )}
+                    ]
+                    
+                    json_str = fq_gateway.invoke(messages=fq_messages, response_format={"type": "json_object"}, stream=False)
+                    res_data = json.loads(json_str)
+                    
+                    st.session_state.suggested_questions = res_data.get("questions", [])[:4]
+                    
+                    # 5. 瞬间重载，刷新药丸
+                    if st.session_state.suggested_questions:
+                        st.rerun()
+                    
+            except Exception as e:
+                logger.error(f"⚠️ 动态推荐生成静默失败: {e}")
+                st.session_state.suggested_questions = []
 
         # ==============================================================
         # 异步线程：后台静默记忆摘要压缩
@@ -644,12 +1137,12 @@ if user_prompt or voice_triggered:
                 time.sleep(2.0)
                 if llm_lock.acquire(blocking=False):
                     try:
-                        summary_res = client.chat.completions.create(
-                            model="gpt-3.5-turbo",
-                            messages=request_payload,
-                            stream=False 
+                        # 实例化一个专门的后台网关 (上下文压缩)
+                        bg_gateway = LLMGateway(task_name="memory_summary")
+                        new_summary = bg_gateway.invoke(
+                            messages=request_payload, 
+                            stream=False
                         )
-                        new_summary = summary_res.choices[0].message.content
                         mem_obj.update_summary(new_summary)
                         print("✅ [后台任务] 长期记忆静默更新完成")
                     except Exception as e:
@@ -657,10 +1150,9 @@ if user_prompt or voice_triggered:
                     finally:
                         llm_lock.release()
                 else:
-                    print("⚠️ [后台避让] 检测到大模型正忙，主动放弃本次摘要，让渡算力给主对话。")
+                    print("⚠️ [后台避让] 检测到大模型正忙，主动放弃本次摘要，算力让给主对话。")
 
             summary_thread = threading.Thread(target=background_summarize, args=(summary_request, memory))
             add_script_run_ctx(summary_thread) 
             summary_thread.start()
-            
             st.toast("🔄 触发记忆阈值，将在后台空闲时静默压缩...", icon="🗄️")

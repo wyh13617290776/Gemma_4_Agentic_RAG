@@ -49,7 +49,7 @@ class ReflectionEngine:
         passed_coverage = False
         max_cov = 0.0
         
-        # 遍历每一个提纯后的子查询（例如：['安宫牛黄丸 研报', '安宫牛黄丸 淘宝']）
+        # 遍历每一个提取后的子查询（例如：['安宫牛黄丸 研报', '安宫牛黄丸 淘宝']）
         for sq in sub_queries:
             # 将当前子查询打散为原子词
             words = set(sq.lower().split())
@@ -61,7 +61,7 @@ class ReflectionEngine:
             coverage = hits / len(words)
             max_cov = max(max_cov, coverage)
             
-            # 💡 只要该网页在任意一个子领域达标，即视为优质专科情报，立刻放行
+            # 💡 只要该网页在任意一个子领域达标，即视为优质专科信息，立刻放行
             if coverage >= self.k_coverage:
                 passed_coverage = True
                 break 
@@ -98,17 +98,17 @@ class ReflectionEngine:
             sim_score = intersection / union if union > 0 else 0
             
             if sim_score > threshold:
-                logger.info(f"📍 去重拦截：发现高度雷同情报 (相似度 {sim_score:.2f})")
+                logger.info(f"📍 去重拦截：发现高度雷同信息 (相似度 {sim_score:.2f})")
                 return True
                 
         return False
 
     def is_saturated(self, current_count: int) -> bool:
         """
-        判定当前情报池是否达到“饱和”状态。
+        判定当前信息池是否达到“饱和”状态。
         注意：入参改为 count，解耦具体数据结构。
         """
         is_ok = current_count >= self.min_urls
         status = "✅ 饱和" if is_ok else "⚠️ 匮乏"
-        logger.info(f"📊 饱和度监测：当前纯净情报 {current_count}/{self.min_urls} ({status})")
+        logger.info(f"📊 饱和度监测：当前纯净信息 {current_count}/{self.min_urls} ({status})")
         return is_ok

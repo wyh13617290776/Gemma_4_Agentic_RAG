@@ -117,16 +117,31 @@ Windows 环境下的配置：
 
 ## ⚙️ 配置说明 (Configuration)
 
-### 1. `.env` (本机独有环境)
+本系统采用模块化配置架构，所有核心敏感信息与业务策略均收拢于 `.env` 及 `config/` 目录下的三大 YAML 文件中：
+
+### 1. `.env` (本机独有环境与密钥)
 请复制 `.env.example` 并重命名为 `.env`。在此配置：
-- **API 密钥**: 联网检索 API Keys（不填则自动降级至 SearXNG）。
-- **网络代理**: 配置 `PROXY_URL` 与 `NO_PROXY`。
+- **云端大模型 API Keys**: 配置 `SILICONFLOW_API_KEY` (DeepSeek, [点击注册试用](https://cloud.siliconflow.cn/)) 与 `DASHSCOPE_API_KEY` (Qwen, [点击注册试用](https://bailian.console.aliyun.com/))。
+- **联网检索 API Keys**: 配置 `SERPER_API_KEY` ([点击注册试用](https://serper.dev/)), `TAVILY_API_KEY` ([点击注册试用](https://tavily.com/)), `EXA_API_KEY` ([点击注册试用](https://exa.ai/))（不填则系统自动降级使用本地 SearXNG + Crawl4AI）。
+- **网络代理**: `PROXY_URL` 与本地白名单 `NO_PROXY` (必须包含 localhost 和 127.0.0.1 避免本地服务被拦截，注：开个VPN使用规则模式)。
 - **运行端口**: `STREAMLIT_SERVER_PORT`（默认 8501）。
 
-### 2. `config/config.yaml` (全局业务策略)
-- **LLM 参数**: 上下文长度 (`n_ctx`)、温度 (`temperature`) 与量化模型路径。
-- **数据库**: Milvus 向量数据库连接 URI。
-- **RAG 策略**: 检索 Top-K、重排阈值与分块逻辑。
+### 2. `config/config.yaml` (全局基础设施与业务策略)
+- **底层引擎与物理路径**: llama-server 路径、MinerU (magic-pdf) 引擎路径、BGE Embedding 及 Reranker 权重模型路径。
+- **基础设施**: Milvus 向量数据库的 URI 及维度 (`dim`) 配置。
+- **RAG 引擎策略**: BM25 本地节点路径、双路召回规模 (`fusion_top_k`)、BGE 二次精排规模 (`rerank_top_k`) 以及最终注入上下文的片段数 (`similarity_top_k`)。
+- **检索引擎与反思机制**: SearXNG 本地地址、多阶梯搜索引擎抓取上限，以及反思引擎的质量过滤阈值（最小有效链接数、文本长度、关键词覆盖率）。
+- **记忆流控**: 短期记忆保留窗口 (`max_window`) 与后台静默摘要的触发阈值 (`summary_threshold`)。
+
+### 3. `config/model_router.yaml` (大模型路由与端点映射)
+- **默认选择**: 定义系统启动时的默认模型 (`default_model`)。
+- **异构资源池定义**: 基于 YAML 锚点模板，统一配置本地 Gemma、硅基流动 (DeepSeek 家族) 及阿里云 (Qwen 纯文本/视觉/Flash极速池) 的端点信息 (`base_url`, `protocol`)。
+- **能力探针与适配器**: 为模型分配 `adapter`（标准或思考型）、标记是否支持深度思考 (`dynamic_thinking`) 及多模态特性声明。
+- **专属覆写**: 为特定模型定义专属的 `generation_cfg`，覆盖全局参数。
+
+### 4. `config/llm_tasks.yaml` (系统级 Agent 任务采样模板)
+- **LLM 对话基准模板**: 按派系（A类 Gemma、B类 Qwen、C类 DeepSeek）定义基础对话的推荐采样参数（`temperature`, `top_p`, `max_tokens`, `top_k`）。
+- **内部神经中枢调优**: 为系统后台运行的 Agent 任务（如 `intent_routing` 意图分发、`query_transformation` 复杂查询提纯、`memory_summary` 长期记忆压缩）配置低发散度的专属严谨参数，确保逻辑执行的确定性。
 
 ---
 

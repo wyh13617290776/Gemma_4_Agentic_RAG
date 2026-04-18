@@ -6,7 +6,15 @@ import psutil
 import subprocess
 import gc
 import torch
-from core.config import CFG
+from core.config import CFG, ROUTER
+
+# 👑 新增：尝试加载 NVIDIA 显卡探针库
+try:
+    import pynvml
+    pynvml.nvmlInit()
+    HAS_NVML = True
+except Exception:
+    HAS_NVML = False
 
 def is_port_in_use(port, host='127.0.0.1'):
     """检测指定端口是否被占用"""
@@ -14,7 +22,9 @@ def is_port_in_use(port, host='127.0.0.1'):
         return s.connect_ex((host, port)) == 0
 
 class HardwareManager:
+    LOCAL_SERVER = ROUTER["models"]["gemma-4-local"]["server_info"]
     PORT = int(CFG["llm_server"]["port"])
+    
 
     @staticmethod
     def get_llm_cmd():
@@ -22,16 +32,16 @@ class HardwareManager:
         
         cmd = [
             server_exe,
-            "--model", CFG["llm_server"]["model_path"],
-            "--ctx-size", str(CFG["llm_server"]["n_ctx"]),
-            "--n-gpu-layers", str(CFG["llm_server"]["n_gpu_layers"]),
-            "--threads", str(CFG["llm_server"]["n_threads"]),
+            "--model", HardwareManager.LOCAL_SERVER["model_path"],
+            "--ctx-size", str(HardwareManager.LOCAL_SERVER["n_ctx"]),
+            "--n-gpu-layers", str(HardwareManager.LOCAL_SERVER["n_gpu_layers"]),
+            "--threads", str(HardwareManager.LOCAL_SERVER["n_threads"]),
             "--host", CFG["llm_server"]["host"],
             "--port", str(HardwareManager.PORT),
             "--special",  
         ]
         
-        mmproj = CFG["llm_server"].get("mmproj_path", "")
+        mmproj = HardwareManager.LOCAL_SERVER.get("mmproj_path", "")
         if mmproj and os.path.exists(mmproj):
             cmd.extend(["--mmproj", mmproj])
             
@@ -102,3 +112,36 @@ class HardwareManager:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
+    
+    # 👑 新增：系统级全局硬件探针
+    @staticmethod
+    def get_system_metrics():
+        """获取 CPU、内存、GPU、显存的实时全局使用率"""
+        # 1. 基础资源探测 (非阻塞方式)
+        metrics = {
+            "cpu_percent": psutil.cpu_percent(interval=0.1),
+            "ram_percent": psutil.virtual_memory().percent,
+            "has_gpu": False,
+            "gpu_util": 0,
+            "vram_used_gb": 0.0,
+            "vram_total_gb": 0.0,
+            "vram_percent": 0.0
+        }
+
+        # 2. NVIDIA GPU 深度探测 (能抓到 llama.cpp 进程的显存占用)
+        if HAS_NVML:
+            try:
+                # 默认获取第一块显卡 (索引 0)
+                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                util_info = pynvml.nvmlDeviceGetUtilizationRates(handle)
+
+                metrics["has_gpu"] = True
+                metrics["gpu_util"] = util_info.gpu
+                metrics["vram_used_gb"] = mem_info.used / (1024**3)
+                metrics["vram_total_gb"] = mem_info.total / (1024**3)
+                metrics["vram_percent"] = (mem_info.used / mem_info.total) * 100
+            except Exception as e:
+                pass # 静默处理，防止显卡休眠等异常导致应用崩溃
+
+        return metrics
