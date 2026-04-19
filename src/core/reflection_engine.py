@@ -41,7 +41,7 @@ class ReflectionEngine:
                 logger.info(f"📍 质量拦截：命中无效/拦截页面特征 [{pattern}]")
                 return False
 
-        # 3. 语义雷达 (👑 Bug修复：独立子意图校验)
+        # 3. 语义雷达 (Bug修复：独立子意图校验)
         # 如果没有提供 sub_queries，只要过了长度和黑名单就放行
         if not sub_queries:
             return True

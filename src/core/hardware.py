@@ -8,7 +8,7 @@ import gc
 import torch
 from core.config import CFG, ROUTER
 
-# 👑 新增：尝试加载 NVIDIA 显卡探针库
+# 新增：尝试加载 NVIDIA 显卡探针库
 try:
     import pynvml
     pynvml.nvmlInit()
@@ -113,7 +113,7 @@ class HardwareManager:
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
     
-    # 👑 新增：系统级全局硬件探针
+    # 新增：系统级全局硬件探针
     @staticmethod
     def get_system_metrics():
         """获取 CPU、内存、GPU、显存的实时全局使用率"""

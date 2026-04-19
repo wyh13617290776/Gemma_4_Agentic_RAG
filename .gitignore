@@ -1,6 +1,9 @@
 # Python 缓存
 __pycache__/
 
+# 依赖包
+dependencies/*.whl
+
 # 虚拟环境
 venv_gemma/
 venv_mineru/

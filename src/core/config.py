@@ -4,7 +4,8 @@ import json
 from dotenv import load_dotenv
 
 # 1. 动态获取项目根目录
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 当前文件 -> core -> src -> 项目根目录
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # 2. 精准定位 config 文件夹下的所有配置文件
@@ -138,6 +139,6 @@ def save_model_override(model_name, new_params):
     with open(ROUTER_PATH, "w", encoding="utf-8") as f:
         yaml.dump(fresh_router, f, sort_keys=False, allow_unicode=True)
         
-    # 5. 👑 关键：手动同步更新内存中的全局变量，让所有 Session 立即看到新配置
+    # 5. 关键：手动同步更新内存中的全局变量，让所有 Session 立即看到新配置
     global ROUTER
     ROUTER = fresh_router

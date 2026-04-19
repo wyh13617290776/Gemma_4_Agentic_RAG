@@ -1,2 +1,0 @@
-## 说明
-请将下载好的 `torch-2.5.1+cu121-cp310-cp310-win_amd64.whl` 和 `torchvision-0.20.1+cu121-cp310-cp310-win_amd64.whl` 放在这个文件夹下

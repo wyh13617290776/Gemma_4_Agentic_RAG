@@ -97,7 +97,7 @@ def extract_table_with_ocr(image_path):
         logger.info("♻️ 解析完毕，Rapid 引擎实例已销毁，内存已归还系统。")
 # ==========================================================
 
-# 👑 1. 初始化滑动窗口切分器 (大块包含前后各3句，小块是单句)
+# 1. 初始化滑动窗口切分器 (大块包含前后各3句，小块是单句)
 node_parser = SentenceWindowNodeParser.from_defaults(
     window_size=3, 
     window_metadata_key="window",
@@ -130,7 +130,7 @@ def process_mineru_to_documents(json_file_path: str, file_name: str, file_hash: 
                         raw_content = res_dict.get('html') or res_dict.get('md') or res_dict.get('text')
                 
                 # =========================================================
-                # 👑 发现 MinerU 摆烂截了图，立刻唤醒 OCR 引擎
+                # 发现 MinerU 摆烂截了图，立刻唤醒 OCR 引擎
                 # =========================================================
                 if not raw_content and 'img_path' in block:
                     img_rel_path = block.get('img_path')
@@ -226,14 +226,14 @@ def process_and_embed_documents(uploaded_files):
             
             progress_bar = st.progress(0, text="🚀 正在启动解析引擎...")
             total_files = len(files_to_process)
-            # 👑 替换为在顶部定义好的“滑动窗口”：
+            # 替换为在顶部定义好的“滑动窗口”：
             splitter = node_parser
             
             for i, file in enumerate(files_to_process):
                 # 释放上一轮的 BGE 显存，确保解析引擎有充足空间
                 EmbeddingService.unload(reason="immediate")
 
-                # 👑 生成当前文件的精确上传时间 (格式: YYYY-MM-DD HH:MM:SS)
+                # 生成当前文件的精确上传时间 (格式: YYYY-MM-DD HH:MM:SS)
                 current_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 base_progress = int((i / total_files) * 100)
@@ -243,7 +243,7 @@ def process_and_embed_documents(uploaded_files):
                     current_val = min(int(base_progress + (file_weight * ratio)), 100)
                     # 1. 更新内部的进度条
                     progress_bar.progress(current_val, text=f"**[{i+1}/{total_files}] {current_val}%** - {msg}")
-                    # 2. 👑 核心优化：同步更新外部的 Status 标题！
+                    # 2. 核心优化：同步更新外部的 Status 标题！
                     # 这样即使用户折叠了面板，也能在外面看到当前正在干嘛
                     status.update(label=f"⏳ [{i+1}/{total_files}] {file.name} | {msg}")
 
@@ -259,7 +259,7 @@ def process_and_embed_documents(uploaded_files):
                 documents_to_chunk = []
 
                 # ========================================================
-                # 👑 核心：智能分流解析逻辑 (Routing Logic)
+                # 核心：智能分流解析逻辑 (Routing Logic)
                 # ========================================================
                 if file_ext == "pdf":
                     # 通道 A：重量级视觉解析 (MinerU) - 专攻复杂排版和公式
@@ -276,7 +276,7 @@ def process_and_embed_documents(uploaded_files):
                     
                     update_progress(0.70, f"📄 MinerU 解析完毕，正在提取底层 JSON 结构化数据...")
                     
-                    # 👑 寻找 MinerU 生成的底层 json 文件 (而不是笼统的 md)
+                    # 寻找 MinerU 生成的底层 json 文件 (而不是笼统的 md)
                     json_file_path = None
                     for root, dirs, files in os.walk(work_dir):
                         for f in files:
@@ -289,7 +289,7 @@ def process_and_embed_documents(uploaded_files):
                     if not json_file_path:
                         raise Exception(f"MinerU 未找到底层的 JSON 结构化文件。")
                         
-                    # 👑 核心升级：调用新函数，直接拿到带有精准页码和 hash 的小块 Document，current_upload_time 传给 MinerU 解析函数
+                    # 核心升级：调用新函数，直接拿到带有精准页码和 hash 的小块 Document，current_upload_time 传给 MinerU 解析函数
                     docs = process_mineru_to_documents(json_file_path, file.name, file.file_hash, current_upload_time)
                     documents_to_chunk.extend(docs)
                     
@@ -303,7 +303,7 @@ def process_and_embed_documents(uploaded_files):
                         reader = SimpleDirectoryReader(input_files=[file_path])
                         parsed_docs = reader.load_data() # 这里返回的是自带页码等原生元数据的列表
                         
-                        # 👑 核心修复：遍历注入自定义元数据，完美保留原生 page_label
+                        # 核心修复：遍历注入自定义元数据，完美保留原生 page_label
                         for p_doc in parsed_docs:
                             p_doc.metadata.update({
                                 "file_name": file.name,
@@ -342,7 +342,7 @@ def process_and_embed_documents(uploaded_files):
                 EmbeddingService.load(device="cuda")
                 update_progress(0.90, f"📥 正在将区块向量化存入 Milvus...")
                 
-                # 👑 优雅入库：直接将装满原生与自定义元数据的文档列表送去切块
+                # 优雅入库：直接将装满原生与自定义元数据的文档列表送去切块
                 nodes = splitter.get_nodes_from_documents(documents_to_chunk)
                 VectorStoreIndex(
                     nodes, 
@@ -351,7 +351,7 @@ def process_and_embed_documents(uploaded_files):
                 )
 
                 # ==========================================================
-                # 👑 核心补丁：为 BM25 混合检索保留本地纯文本 Nodes 备份
+                # 核心补丁：为 BM25 混合检索保留本地纯文本 Nodes 备份
                 # ==========================================================
                 NODES_FILE = "local_bm25_nodes.pkl"
                 existing_nodes = []

@@ -1,6 +1,25 @@
-version: '3.5'
+# ============================================================
+# Gemma 4 Agentic RAG — 统一基础设施编排
+#
+# 包含以下服务：
+#   - Milvus (etcd + minio + standalone + attu): 向量数据库
+#   - SearXNG: 本地无追踪联网搜索
+#
+# 启动所有服务：
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# 单独启动某个服务（如仅启动 Milvus）：
+#   docker compose -f docker/docker-compose.yml up -d etcd minio standalone attu
+#
+# 单独启动 SearXNG：
+#   docker compose -f docker/docker-compose.yml up -d searxng
+# ============================================================
 
 services:
+
+  # ----------------------------------------------------------
+  # Milvus 向量数据库 (etcd + minio + standalone + attu)
+  # ----------------------------------------------------------
   etcd:
     container_name: milvus-etcd
     image: quay.io/coreos/etcd:v3.5.5
@@ -54,7 +73,7 @@ services:
       timeout: 20s
       retries: 3
     ports:
-      - "19530:19530" # 这是代码里连接用的端口
+      - "19530:19530" # 代码里连接用的端口
       - "9091:9091"
     depends_on:
       - "etcd"
@@ -70,3 +89,23 @@ services:
       - "8080:3000" # 浏览器访问端口
     depends_on:
       - "standalone"
+
+  # ----------------------------------------------------------
+  # SearXNG 本地无追踪搜索引擎
+  # ----------------------------------------------------------
+  searxng:
+    container_name: searxng
+    image: searxng/searxng:latest
+    ports:
+      - "8081:8080" # 左边是宿主机端口（8081），右边是容器内端口
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8081/ # URL 端口必须和上面的宿主机端口保持一致
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID

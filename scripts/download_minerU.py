@@ -5,7 +5,7 @@ import importlib.util
 
 def get_venv_python():
     """获取项目根目录下 venv_gemma 的解释器路径"""
-    root_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     # 适配 Windows 和 Linux/Mac 的路径差异
     if sys.platform == "win32":
@@ -74,7 +74,8 @@ def main():
         sys.exit(1)
 
     # 4. 执行下载
-    target_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "minerU")
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    target_dir = os.path.join(root_dir, "models", "minerU")
     print(f"\n📁 目标路径: {target_dir}")
     print("🚀 正在从 ModelScope 拉取 OpenDataLab/PDF-Extract-Kit-1.0...")
     

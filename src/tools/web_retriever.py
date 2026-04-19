@@ -80,7 +80,7 @@ class UltimateWebRetriever:
                 "https": proxy_url,
             }
         
-        # 3. 👑 核心修复：动态注入白名单环境变量
+        # 3. 核心修复：动态注入白名单环境变量
         os.environ['NO_PROXY'] = no_proxy
         
         logger.info(f"✅ 代理环境已对齐：API 走 {proxy_url}，本地 SearXNG 自动绕过")
@@ -125,7 +125,7 @@ class UltimateWebRetriever:
         payload.update(payload_ext)
 
         try:
-            # 👑 策略 A：对于外部 API，如果代理报错，尝试禁用代理直连
+            # 策略 A：对于外部 API，如果代理报错，尝试禁用代理直连
             response = self.session.post(url, json=payload, timeout=15)
             if response.status_code != 200:
                 return {}
@@ -244,7 +244,7 @@ class UltimateWebRetriever:
         if self.serper_key:
             try:
                 headers = {'X-API-KEY': self.serper_key, 'Content-Type': 'application/json'}
-                # 👑 策略 B：给 Serper 增加 verify=False (临时绕过 SSL 检查) 或禁用代理
+                # 策略 B：给 Serper 增加 verify=False (临时绕过 SSL 检查) 或禁用代理
                 res = self.session.post(
                     "https://google.serper.dev/search", 
                     headers=headers, 
@@ -286,7 +286,7 @@ class UltimateWebRetriever:
             return ""
     
     # ==========================================
-    # 👑 核心逻辑：带级联反思与自愈的检索引擎
+    # 核心逻辑：带级联反思与自愈的检索引擎
     # ==========================================
     async def search_and_scrape(self, sub_queries: list, max_results: int = 3) -> str:
         """
@@ -332,9 +332,9 @@ class UltimateWebRetriever:
             for res in scrape_results:
                 if res["status"] == "success":
                     content = res['content']
-                    # 👑 1. 质量检验 (防短、防毒、防跑题)
+                    # 1. 质量检验 (防短、防毒、防跑题)
                     if self.reflector.evaluate_quality(content, sub_queries):
-                        # 👑 2. 增量去重检验 (防新闻通稿)
+                        # 2. 增量去重检验 (防新闻通稿)
                         if not self.reflector.is_redundant(content, raw_texts_for_dedup):
                             # 检验全部通过！正式编入战报
                             successful_contents.append(self._format_reference("联网搜索", res['url'], content))
@@ -351,7 +351,7 @@ class UltimateWebRetriever:
                 for url in failed_urls:
                     t_res = await asyncio.to_thread(self._tavily_request, "extract", {"urls": [url]})
                     
-                    # 👑 防护装甲 3：严格校验提取结果的结构
+                    # 防护装甲 3：严格校验提取结果的结构
                     if not t_res or not isinstance(t_res, dict):
                         continue
                         
@@ -369,12 +369,12 @@ class UltimateWebRetriever:
         # -----------------------------------------------------
         # 第二阶段：自省与 Tavily 商业补偿 (使用 tavily_max_results)
         # -----------------------------------------------------
-        # 👑 修复 2：使用模块化的饱度度检测，统一管理日志和阈值
+        # 修复 2：使用模块化的饱度度检测，统一管理日志和阈值
         if not self.reflector.is_saturated(len(successful_contents)):
             logger.info("🚀 激活 Tavily 搜索补充...")
             backup_content = await asyncio.to_thread(self._tavily_full_backup, search_query, self.tavily_max_results)
             
-            # 👑 防护装甲 4：确保 backup_content 是有实际意义的字符串
+            # 防护装甲 4：确保 backup_content 是有实际意义的字符串
             if backup_content and isinstance(backup_content, str):
                 if "未获取到" not in backup_content and "不可用" not in backup_content and "未提取到正文" not in backup_content:
                     successful_contents.append(f"\n--- 💡 Tavily 搜索补充结果 ---\n{backup_content}")
@@ -416,7 +416,7 @@ class UltimateWebRetriever:
             "include_raw_content": True
         })
 
-        # 👑 防护装甲 1：彻底的类型与存在性校验
+        # 防护装甲 1：彻底的类型与存在性校验
         if not t_data or not isinstance(t_data, dict):
             logger.warning("⚠️ Tavily 备份请求失败或返回格式错误")
             return "联网检索模块暂时不可用（API 响应异常）。"
@@ -426,7 +426,7 @@ class UltimateWebRetriever:
             logger.warning("⚠️ Tavily 请求成功，但未搜索到任何结果")
             return "已连接网络，但未搜索到与关键词相关的公开信息。"
         
-        # 👑 防护装甲 2：安全地从字典中取值
+        # 防护装甲 2：安全地从字典中取值
         valid_contents = []
         for i in results:
             if isinstance(i, dict):

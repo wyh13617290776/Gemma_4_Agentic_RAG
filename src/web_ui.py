@@ -31,7 +31,7 @@ from pymilvus import connections
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # ==========================================
-# 👑 导入内部核心业务组件 (统一配置中心)
+# 导入内部核心业务组件 (统一配置中心)
 # ==========================================
 from core.config import (
     CFG, ROUTER, TASKS, PROMPTS, ROUTER_PATH,
@@ -67,7 +67,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("AgenticRAG")
-logger.info("系统日志模块初始化完毕。")
+# logger.info("系统日志模块初始化完毕。")
 
 # ==========================================
 # 全局算力锁与缓存单例
@@ -388,7 +388,7 @@ def render_dashboard():
     with st.expander("⚙️ 核心引擎调度与硬件监控面板", expanded=False):
         if is_local_mode:
             # 节点1：主动检测与弹窗触发
-            # 👑 核心关卡：读取安检状态
+            # 核心关卡：读取安检状态
             is_env_ready = st.session_state.get("env_check_passed", False)
             
             # ==========================================================
@@ -577,16 +577,18 @@ with st.sidebar:
                 st.rerun()
 
     with c2:
-        if st.button("💾 保存配置", use_container_width=True, type="primary"):
-            # 仅保存当前模型的专属微调
-            c_params = {
-                "temperature": st.session_state["cur_temp"],
-                "top_p": st.session_state["cur_top_p"],
-                "top_k": st.session_state["cur_top_k"],
-                "max_tokens": st.session_state["cur_max_tokens"]
-            }
-            save_model_override(active_m, c_params)
-            st.success(f"✅ {active_m} 专属配置已固化")
+        save_config_clicked = st.button("💾 保存配置", use_container_width=True, type="primary")
+    
+    if save_config_clicked:
+        # 仅保存当前模型的专属微调
+        c_params = {
+            "temperature": st.session_state["cur_temp"],
+            "top_p": st.session_state["cur_top_p"],
+            "top_k": st.session_state["cur_top_k"],
+            "max_tokens": st.session_state["cur_max_tokens"]
+        }
+        save_model_override(active_m, c_params)
+        st.success(f"✅ {active_m} 专属配置已保存")
 
     st.divider()
     
@@ -720,7 +722,7 @@ with st.container(border=True):
             upload_file_dialog() 
             
     with cols[1]:
-        # 👑 核心自适应：动态禁用/启用“深度思考”按钮
+        # 核心自适应：动态禁用/启用“深度思考”按钮
         can_think = st.session_state.get("supports_thinking", False)
         btn_type = "primary" if st.session_state.get("enable_thinking", False) else "secondary"
         help_text = "开启/关闭深度思考过程展示" if can_think else "⚠️ 当前选择的大模型不支持深度思考"
@@ -803,7 +805,8 @@ for i, message in enumerate(ui_messages):
                     for t in trace_data:
                         st.markdown(t["title"])
                         st.markdown(t["score"])
-                        st.markdown(t["content"])
+                        # 修改 3：同样加上 unsafe_allow_html=True，保证刷新后表格依然漂亮
+                        st.markdown(t["content"], unsafe_allow_html=True)
                         st.divider()
             
             # =========================================================
@@ -1033,7 +1036,8 @@ if user_prompt or voice_triggered:
                 trace_list.append({
                     "title": f"📄 **来源 {i+1}**：{meta.get('file_name', '未知')} ({page_info})",
                     "score": f"🎯 **语义匹配度**：`{percentage_score}`",
-                    "content": f"> {meta.get('original_text', n.get_content())}"
+                    # 修改 1：去掉 f"> { ... }" 这个包裹，直接传入最纯净的原始文本/HTML
+                    "content": meta.get('original_text', n.get_content())
                 })
                 
             # 1. 强行注入历史记录，保证刷新页面绝不丢失！
@@ -1045,7 +1049,8 @@ if user_prompt or voice_triggered:
                 for t in trace_list:
                     st.markdown(t["title"])
                     st.markdown(t["score"])
-                    st.markdown(t["content"])
+                    # 修改 2：加上 unsafe_allow_html=True，让 OCR 生成的 HTML 表格原地复活
+                    st.markdown(t["content"], unsafe_allow_html=True)
                     st.divider()
 
         # ==========================================================

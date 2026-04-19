@@ -18,6 +18,54 @@
 
 ---
 
+## 🗂️ 项目结构 (Project Structure)
+
+```
+Gemma_Agent_Project/
+├── src/                          # 主业务代码包
+│   ├── __init__.py
+│   ├── agents/                   # Agent 编排与路由
+│   │   ├── orchestrator.py
+│   │   └── router.py
+│   ├── core/                     # 底层基础设施
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── hardware.py
+│   │   ├── llm_gateway.py
+│   │   ├── multimodal_engine.py
+│   │   ├── query_transformer.py
+│   │   ├── rag_engine.py
+│   │   └── reflection_engine.py
+│   ├── memory/                   # 记忆模块
+│   ├── tools/                    # 外部工具封装
+│   └── web_ui.py                 # Streamlit Web 界面
+├── config/                       # 所有配置文件
+│   ├── config.yaml               # 全局基础设施与业务策略
+│   ├── model_router.yaml         # 大模型路由与端点映射
+│   ├── llm_tasks.yaml            # Agent 任务采样模板
+│   ├── prompts.json              # 系统提示词库
+│   └── tools.json                # 工具定义
+├── docker/                       # Docker 基础设施编排
+│   └── docker-compose.yml        # Milvus + SearXNG 一体化配置
+├── dependencies/                 # 依赖目录：离线 PyTorch .whl 安装包
+│   ├── requirements_gemma.txt    # Gemma 4 依赖清单
+│   ├── requirements_mineru.txt   # MinerU 依赖清单
+│   ├── README.md                 # 各环境所需版本说明
+├── scripts/                      # 运维与工具脚本
+│   └── download_minerU.py        # MinerU 模型一键下载
+├── assets/                       # 静态资源
+├── models/                       # 本地模型权重
+│   └── minerU/                   # MinerU 解析模型
+├── llama/                        # llama.cpp 引擎目录
+├── .env                          # 本地环境变量（不入库）
+├── .env.example                  # 环境变量模板
+├── setup.bat                     # Windows 一键初始化脚本
+├── setup.sh                      # Linux/Mac 一键初始化脚本
+└── README.md
+```
+
+---
+
 ## 🖥️ Windows 前置环境准备 (Windows Prerequisites)
 
 对于 Windows 系统的用户，为了确保 GPU 加速正常运行以及后续 Docker 容器的顺利部署，在开始一切操作之前，请务必确认已安装以下基础运行环境：
@@ -26,8 +74,8 @@
    - 请先打开终端 (CMD/PowerShell) 输入 `nvidia-smi` 查看您的显卡支持的最高 CUDA 版本（例如我的电脑右上角显示的就是 `CUDA Version: 12.6`）。
    - 前往 NVIDIA 官网下载对应的安装包（例如对应 12.6 版本下载 `cuda_12.6.0_560.76_windows.exe` [下载](https://developer.nvidia.com/cuda-12-6-0-download-archive)）并完成默认安装。
 2. **WSL2 与 硬件虚拟化 (Hardware Virtualization)**:
-   - **状态自查**：右键任务栏 -> 任务管理器 -> 性能 -> CPU，查看右下角是否显示 **“虚拟化：已启用”**。
-   - **开启方式**：若显示“已禁用”，需重启电脑并进入 BIOS（通常开机按 `F2`、`Del` 或 `F12`）：
+   - **状态自查**：右键任务栏 -> 任务管理器 -> 性能 -> CPU，查看右下角是否显示 **"虚拟化：已启用"**。
+   - **开启方式**：若显示"已禁用"，需重启电脑并进入 BIOS（通常开机按 `F2`、`Del` 或 `F12`）：
      - **Intel 平台**：找到 `Intel Virtualization Technology` 或 `VT-x`，设为 `Enabled`。
      - **AMD 平台**：找到 `SVM Mode` 或 `Secure Virtual Machine`，设为 `Enabled`。
    - **系统安装**：在管理员权限终端运行 `wsl --install`。安装后必须**重启电脑**。
@@ -44,20 +92,20 @@
 
 1. **llama.cpp 引擎**:
    - 请前往官方仓库下载适合您本地硬件配置的 `llama.cpp`， [下载llama](https://github.com/ggml-org/llama.cpp/releases?q=b8708&expanded=true) ，Windows环境推荐下载 `Windows x64 (Vulkan)` 版本。
-   - 将解压后的核心可执行文件（如 `llama-server.exe` ）和相关的 `ddl` 文件的文件夹 (如 `llama/llama-b8708` 包含 `*.exe` 和 `*.ddl` ) 直接放置在 **项目根目录** 下。
+   - 将解压后的核心可执行文件（如 `llama-server.exe` ）和相关的 `ddl` 文件的文件夹 (如 `llama/llama-b8708` 包含 `*.exe` 和 `*.ddl` ) 直接放置在项目根目录下的 `llama/` 目录中。
 
 2. **核心模型权重 (Models)**:
-   - LLM模型及组件 **gemma 4** 模型和多模态组件 **mmproj**，此处仅提供一个我自己的下载组合参考：[gemma-4-E4B-it-Q4_K_M](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf) 和 [mmproj-F16](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf)，放在项目根目录新建的 `models` 文件夹中。
+   - LLM模型及组件 **gemma 4** 模型和多模态组件 **mmproj**，此处仅提供一个我自己的下载组合参考：[gemma-4-E4B-it-Q4_K_M](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf) 和 [mmproj-F16](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf)，放在项目根目录 `models/` 文件夹中。
    - 系统依赖稠密向量检索模型 **bge-m3** [下载bge-m3](https://huggingface.co/BAAI/bge-m3/tree/main) 
    - **⚠️注意**: 由于 Pytorch 版本支持问题，需将 `bge-m3` 中的 `pytorch_model.bin` 文件替换成：`model.safetensors` [下载model.safetensors](https://huggingface.co/trollathon/bge-m3-safetensors/blob/main/model.safetensors) 
    - 交叉重排模型 **bge-ranker** [下载bge-ranker](https://huggingface.co/BAAI/bge-reranker-v2-m3/tree/main)
-   - 请自行下载并存放在项目根目录新建的 `models` 文件夹中。
+   - 请自行下载并存放在项目根目录的 `models/` 文件夹中。
 
    - **MinerU 多模态解析模型自动下载**: 
      一键跨平台下载脚本。
    - **操作步骤**: 直接在项目根目录下运行（无需手动激活虚拟环境）：
      ```bash
-     python download_minerU.py
+     python scripts/download_minerU.py
      ```
    - **自动化逻辑**: 
      - **自动识别**: 脚本会自动检测并进入根目录下的 `venv_gemma` 虚拟环境。
@@ -77,14 +125,14 @@
 
 本项目依赖 GPU 加速，请严格按照以下步骤准备依赖：
 
-1. **准备离线包**: 前往 PyTorch 官网下载匹配您本地 CUDA 版本的 `torch` 和 `torchvision` 的 `.whl` 文件 (对应文件夹的README.md中有版本说明)
+1. **准备离线包**: 前往 PyTorch 官网下载匹配您本地 CUDA 版本的 `torch` 和 `torchvision` 的 `.whl` 文件（版本说明见 `dependencies/README.md`）。
 2. **分发依赖**: 
-   - 将 Gemma 环境所需的 `.whl` 放入 `gemma_4_dependencies/` 目录。
-   - 将 MinerU 环境所需的 `.whl` 放入 `minerU_dependencies/` 目录。
+   - 将 **两个环境** 所需的 `.whl` 文件**统一放入** `dependencies/` 目录。
+   - 脚本会根据文件名中的 CUDA 版本（`cu121` vs `cu126`）自动分配给对应虚拟环境。
 3. **执行初始化**:
    - **Windows**: 双击运行项目根目录下的 `setup.bat`。
    - **Linux/Mac**: 在终端运行 `bash setup.sh`。
-4. 脚本将自动构建双环境并在完成后自动拉起 Web UI。
+4. 脚本将自动构建双环境，完成后**仅激活 `venv_gemma`** 并自动拉起 Web UI。
 
 *(注意：请确保 `config/config.yaml` 中的 `mineru.exe_path` 指向 `venv_mineru/Scripts/magic-pdf.exe`)*
 
@@ -147,26 +195,27 @@ Windows 环境下的配置：
 
 ## 🐳 Docker 部署 (Docker Infrastructure)
 
-我们在 `docker_yaml` 目录下提供了模块化的容器编排方案，用于一键部署基础设施：
+项目在 `docker/` 目录下提供了**统一的容器编排方案**，Milvus 向量数据库与 SearXNG 搜索服务合并到同一个 `docker-compose.yml` 中，一键部署所有基础设施。
 
-### 1、向量数据库 (Milvus) 
-负责处理高维向量存储与检索。
+### 启动所有服务（推荐）
 ```bash
-cd docker_yaml/milvus_docker
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 ```
 
-### 2、url获取工具 (SearXNG)
-负责处理无追踪的本地联网搜索服务。
+### 单独启动 Milvus（向量数据库）
 ```bash
-cd docker_yaml/serxng_docker
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d etcd minio standalone attu
+```
+
+### 单独启动 SearXNG（本地搜索引擎）
+```bash
+docker compose -f docker/docker-compose.yml up -d searxng
 ```
 
 > **⚠️ SearXNG 核心配置修改说明**:
-> 在通过 `docker-compose up -d` 首次启动 SearXNG 后，系统会在同级目录下生成一个 `searxng` 文件夹。为了确保 Agent 能够通过 API 获取结构化的搜索数据，请务必执行以下步骤：
+> 在通过 `docker compose up -d` 首次启动 SearXNG 后，系统会在 `docker/` 目录下生成一个 `searxng` 文件夹。为了确保 Agent 能够通过 API 获取结构化的搜索数据，请务必执行以下步骤：
 > 
-> 1. 编辑配置文件 `docker_yaml/serxng_docker/searxng/settings.yml`。
+> 1. 编辑配置文件 `docker/searxng/settings.yml`。
 > 2. 找到 `search` 节点下的 `formats` 配置，并在其中手动加上 `- json`：
 >    ```yaml
 >    search:
@@ -176,7 +225,7 @@ docker-compose up -d
 >    ```
 > 3. **执行重启命令使配置生效**:
 >    ```bash
->    docker-compose restart searxng
+>    docker compose -f docker/docker-compose.yml restart searxng
 >    ```
 
 ---

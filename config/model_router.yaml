@@ -1,55 +1,46 @@
-# config/model_router.yaml
-
-default_model: "gemma-4-local"
-
-# =========================================================
-# 全局配置模板 (Base Templates)
-# =========================================================
-
-# --- 硅基流动模板 ---
-.sf_base: &sf_base
-  type: "deepseek"
-  protocol: "openai"
-  base_url: "https://api.siliconflow.cn/v1"
-  key_env: "SILICONFLOW_API_KEY"
-
-.sf_standard: &sf_standard
-  <<: *sf_base
-  adapter: "standard"
-
-.sf_think: &sf_think
-  <<: *sf_base
-  adapter: "deepseek"
+default_model: gemma-4-local
+.sf_base:
+  type: deepseek
+  protocol: openai
+  base_url: https://api.siliconflow.cn/v1
+  key_env: SILICONFLOW_API_KEY
+.sf_standard:
+  type: deepseek
+  protocol: openai
+  base_url: https://api.siliconflow.cn/v1
+  key_env: SILICONFLOW_API_KEY
+  adapter: standard
+.sf_think:
+  type: deepseek
+  protocol: openai
+  base_url: https://api.siliconflow.cn/v1
+  key_env: SILICONFLOW_API_KEY
+  adapter: deepseek
   dynamic_thinking: true
-
-# --- 阿里云模板 ---
-.ali_base: &ali_base
-  type: "qwen"
-  protocol: "openai"
-  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  key_env: "DASHSCOPE_API_KEY"
-
-.ali_standard: &ali_standard
-  <<: *ali_base
-  adapter: "standard"
-
-.ali_think: &ali_think
-  <<: *ali_base
-  adapter: "deepseek"
+.ali_base:
+  type: qwen
+  protocol: openai
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  key_env: DASHSCOPE_API_KEY
+.ali_standard:
+  type: qwen
+  protocol: openai
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  key_env: DASHSCOPE_API_KEY
+  adapter: standard
+.ali_think:
+  type: qwen
+  protocol: openai
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  key_env: DASHSCOPE_API_KEY
+  adapter: deepseek
   dynamic_thinking: true
-
-# =========================================================
-# 模型实例映射 (Model Instances)
-# =========================================================
 models:
-  # =========================================================
-  # Google：本地 Gemma 4 (推理与 RAG 基础)
-  # =========================================================
   gemma-4-local:
-    type: "gemma"
-    protocol: "openai"
-    base_url: "http://127.0.0.1:8000/v1"
-    adapter: "local_think"
+    type: gemma
+    protocol: openai
+    base_url: http://127.0.0.1:8000/v1
+    adapter: local_think
     server_info:
       model_path: models/gemma-4-E4B-it-Q4_K_M.gguf
       mmproj_path: models/mmproj-F16.gguf
@@ -65,117 +56,179 @@ models:
     generation_cfg:
       temperature: 1.0
       top_p: 0.95
-      max_tokens: 4096
       top_k: 64
-
-  # ---------------------------------------------------------
-  # 1. 硅基流动 - DeepSeek 家族
-  # ---------------------------------------------------------
+      max_tokens: 4096
   deepseek-ai/DeepSeek-V3:
-    <<: *sf_standard
+    type: deepseek
+    protocol: openai
+    base_url: https://api.siliconflow.cn/v1
+    key_env: SILICONFLOW_API_KEY
+    adapter: standard
     generation_cfg:
       temperature: 0.6
       top_p: 0.9
       max_tokens: 4096
       top_k: 20
-
   deepseek-ai/DeepSeek-V3.2:
-    <<: *sf_think
+    type: deepseek
+    protocol: openai
+    base_url: https://api.siliconflow.cn/v1
+    key_env: SILICONFLOW_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.6
       top_p: 0.9
       max_tokens: 4096
       top_k: 20
-
   deepseek-ai/DeepSeek-R1:
-    <<: *sf_think
+    type: deepseek
+    protocol: openai
+    base_url: https://api.siliconflow.cn/v1
+    key_env: SILICONFLOW_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.6
       top_p: 0.9
       max_tokens: 4096
       top_k: 20
-  
-  # ---------------------------------------------------------
-  # 2. 阿里云 - 千问 Qwen3.6 纯文本系列
-  # ---------------------------------------------------------
   qwen3.6-flash-2026-04-16:
-    <<: *ali_think
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
-      max_tokens: 4096
       top_k: 50
-
+      max_tokens: 4096
   qwen3.6-35b-a3b:
-    <<: *ali_think
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
-
   qwen3.6-plus-2026-04-02:
-    <<: *ali_think
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
-  
-  # ---------------------------------------------------------
-  # 3. 阿里云 - 千问 视觉推理系列 (Qwen3-VL & QVQ)
-  # ---------------------------------------------------------
   qwen3-vl-flash-2026-01-22:
-    <<: *ali_think
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
-
   qwen3-vl-plus:
-    <<: *ali_think
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
-
   qwen3-vl-plus-2025-09-23:
-    <<: *ali_think
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
-
   qvq-max-2025-03-25:
-    <<: *ali_think
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
     generation_cfg:
       temperature: 0.85
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
-  
-  # ---------------------------------------------------------
-  # 4. 阿里云 - 千问 Flash 极速池 (用于轻量任务，保持 Standard)
-  # ---------------------------------------------------------
   qwen-mt-flash:
-    <<: *ali_standard
-    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
-
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: standard
+    generation_cfg:
+      temperature: 0.8
+      top_p: 0.8
+      max_tokens: 1024
+      top_k: 50
   qwen3.6-flash:
-    <<: *ali_standard
-    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
-
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: standard
+    generation_cfg:
+      temperature: 0.8
+      top_p: 0.8
+      max_tokens: 1024
+      top_k: 50
   qwen-flash:
-    <<: *ali_standard
-    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
-
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: standard
+    generation_cfg:
+      temperature: 0.8
+      top_p: 0.8
+      max_tokens: 1024
+      top_k: 50
   qwen-flash-2025-07-28:
-    <<: *ali_standard
-    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
-
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: standard
+    generation_cfg:
+      temperature: 0.8
+      top_p: 0.8
+      max_tokens: 1024
+      top_k: 50
   qwen3.5-flash:
-    <<: *ali_standard
-    generation_cfg: { temperature: 0.8, top_p: 0.8, max_tokens: 1024, top_k: 50 }
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: standard
+    generation_cfg:
+      temperature: 0.8
+      top_p: 0.8
+      max_tokens: 1024
+      top_k: 50

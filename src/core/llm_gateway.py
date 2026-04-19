@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import streamlit as st
 
-# 👑 核心依赖：从中央配置中心导入解析好的全局变量和路由函数
+# 核心依赖：从中央配置中心导入解析好的全局变量和路由函数
 from core.config import ROUTER, TASKS, get_model_generation_params
 
 load_dotenv()
