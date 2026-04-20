@@ -117,6 +117,18 @@ models:
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
+  qwen3.6-plus:
+    type: qwen
+    protocol: openai
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key_env: DASHSCOPE_API_KEY
+    adapter: deepseek
+    dynamic_thinking: true
+    generation_cfg:
+      temperature: 0.85
+      top_p: 0.8
+      max_tokens: 4096
+      top_k: 50
   qwen3.6-plus-2026-04-02:
     type: qwen
     protocol: openai
@@ -165,19 +177,19 @@ models:
       top_p: 0.8
       max_tokens: 4096
       top_k: 50
-  qvq-max-2025-03-25:
-    type: qwen
-    protocol: openai
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    key_env: DASHSCOPE_API_KEY
-    adapter: deepseek
-    dynamic_thinking: true
-    generation_cfg:
-      temperature: 0.85
-      top_p: 0.8
-      max_tokens: 4096
-      top_k: 50
-  qwen-mt-flash:
+  # qvq-max-2025-03-25:  # qvq-max-latest
+  #   type: qwen
+  #   protocol: openai
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   key_env: DASHSCOPE_API_KEY
+  #   adapter: deepseek
+  #   dynamic_thinking: true
+  #   generation_cfg:
+  #     temperature: 0.85
+  #     top_p: 0.8
+  #     max_tokens: 4096
+  #     top_k: 50
+  qwen3.5-flash-2026-02-23:
     type: qwen
     protocol: openai
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -221,7 +233,7 @@ models:
       top_p: 0.8
       max_tokens: 1024
       top_k: 50
-  qwen3.5-flash:
+  qwen-mt-flash:
     type: qwen
     protocol: openai
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1

@@ -13,7 +13,7 @@ from markdownify import markdownify as md
 # 引入项目全局配置
 from core.config import CFG
 # 引入反思模块
-from core.reflection_engine import ReflectionEngine
+from engines.reflection_engine import ReflectionEngine
 
 # 配置系统日志
 logging.basicConfig(

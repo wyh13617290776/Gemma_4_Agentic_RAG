@@ -18,27 +18,61 @@
 
 ---
 
-## 🗂️ 项目结构 (Project Structure)
+## 🗂️ 项目结构 (Project Structure) 
+**`src/`** 目录结构——分层解耦架构升级
 
 ```
 Gemma_Agent_Project/
-├── src/                          # 主业务代码包
-│   ├── __init__.py
-│   ├── agents/                   # Agent 编排与路由
-│   │   ├── orchestrator.py
-│   │   └── router.py
-│   ├── core/                     # 底层基础设施
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── hardware.py
-│   │   ├── llm_gateway.py
-│   │   ├── multimodal_engine.py
-│   │   ├── query_transformer.py
-│   │   ├── rag_engine.py
-│   │   └── reflection_engine.py
-│   ├── memory/                   # 记忆模块
-│   ├── tools/                    # 外部工具封装
-│   └── web_ui.py                 # Streamlit Web 界面
+├── src/
+│   ├── core/                        # 底层基础设施（无任何业务逻辑）
+│   │   ├── __init__.py
+│   │   ├── config.py                # 保持不变
+│   │   ├── database.py              # 保持不变
+│   │   ├── hardware.py              # 保持不变
+│   │   └── llm_gateway.py           # 保持不变
+│   │
+│   ├── engines/                     # 从 core/ 迁出：高级业务引擎
+│   │   ├── __init__.py
+│   │   ├── rag_engine.py            # 移自 core/rag_engine.py
+│   │   ├── multimodal_engine.py     # 移自 core/multimodal_engine.py
+│   │   ├── reflection_engine.py     # 移自 core/reflection_engine.py
+│   │   └── query_transformer.py     # 移自 core/query_transformer.py
+│   │
+│   ├── agents/                      # 智能体层（扩展多角色）
+│   │   ├── __init__.py
+│   │   ├── orchestrator.py          # 保持不变（图状态机 + 节点流转）
+│   │   ├── router.py                # 保持不变（用户意图分发）
+│   │   └── base_agent.py            # 抽象基类，规范多角色智能体接口
+│   │
+│   ├── memory/                      # 记忆层（拆分长短期 + 压缩）
+│   │   ├── __init__.py
+│   │   ├── short_term.py            # 从 chat_memory.py 拆出滑动窗口逻辑
+│   │   ├── long_term.py             # 长期记忆持久化（摘要存档/检索）
+│   │   ├── compressor.py            # 记忆压缩器（触发阈值 + LLM 摘要）
+│   │   └── manager.py               # 重构自 chat_memory.py，统一调度入口
+│   │
+│   ├── session/                     # 会话状态机（从 web_ui.py 解耦）
+│   │   ├── __init__.py
+│   │   ├── state.py                 # SessionState 数据类（纯数据，无 UI 依赖）
+│   │   └── context_tracker.py       # 上下文流转追踪器（多轮对话管理）
+│   │
+│   ├── tools/                       # 外部工具封装
+│   │   ├── __init__.py
+│   │   ├── web_retriever.py         # 保持不变
+│   │   └── doc_parser.py            # 保持不变
+│   │
+│   ├── api/                         # FastAPI 接口层（预留扩展）
+│   │   ├── __init__.py
+│   │   ├── main.py                  # FastAPI 应用入口
+│   │   ├── routes/
+│   │   │   ├── __init__.py
+│   │   │   ├── chat.py              # POST /chat 接口
+│   │   │   └── documents.py         # POST /documents/upload 接口
+│   │   └── schemas/
+│   │       ├── __init__.py
+│   │       └── chat_schema.py       # Pydantic 请求/响应模型
+│   │
+│   └── web_ui.py                    # 瘦身后的 Streamlit 入口（仅负责渲染）
 ├── config/                       # 所有配置文件
 │   ├── config.yaml               # 全局基础设施与业务策略
 │   ├── model_router.yaml         # 大模型路由与端点映射

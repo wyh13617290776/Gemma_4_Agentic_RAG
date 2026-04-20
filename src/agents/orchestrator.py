@@ -1,7 +1,6 @@
 import re
 import asyncio
-import streamlit as st  # 引入 st
-from core.query_transformer import QueryTransformer
+from engines.query_transformer import QueryTransformer
 from core.config import PROMPTS
 
 class AgentState:
@@ -22,11 +21,17 @@ class AgentState:
         self.system_content_blocks = []
 
 class GraphOrchestrator:
-    def __init__(self, router_engine, rag_engine, web_retriever):
+    def __init__(self, router_engine, rag_engine, web_retriever, ui_callback=None):
         self.router = router_engine
         self.rag = rag_engine
         self.web = web_retriever
         self.transformer = QueryTransformer()
+        self.ui_callback = ui_callback  # ⬅️ 接收外部传入的 UI 回调函数
+    
+    def _notify(self, msg_type: str, msg: str, icon: str = None):
+        """通用事件播报器，彻底解耦 UI 框架"""
+        if self.ui_callback:
+            self.ui_callback(msg_type, msg, icon)
 
     def _apply_architect_patch(self, state: AgentState, enable_web_search: bool):
         """
@@ -59,6 +64,7 @@ class GraphOrchestrator:
             if any(re.search(p, query) for p in web_patterns):
                 state.intents.append("web_search")
                 print("🛡️ [补丁] 探测到强时效性/外部需求，已强制追加 web_search")
+                self._notify("toast", "🛡️ Architect Patch 强制介入：追加联网搜索", icon="🛠️") # 播报
 
         # --- 📚 策略 C：本地知识库补偿矩阵 (Local RAG Compensation) ---
         # 针对提及本地资料或文件的指令进行增强
@@ -74,6 +80,7 @@ class GraphOrchestrator:
             if any(re.search(p, query) for p in rag_patterns):
                 state.intents.append("search_knowledge_base")
                 print("🛡️ [补丁] 探测到本地资料引用，已强制追加 search_knowledge_base")
+                self._notify("toast", "🛡️ Architect Patch 强制介入：追加知识库检索", icon="🛠️")
 
         # --- 👁️ 策略 D：多模态强制纠偏 (Multimodal Reinforcement) ---
         # 只有在确实存在附件的情况下才触发，防止空载
@@ -137,9 +144,22 @@ class GraphOrchestrator:
             state.sub_queries = [state.user_query]
         
         # --- 步骤 4：UI 播报（此时播报的信息是经过补丁修正后的最准意图） ---
-        st.toast(f"🧩 最终决策: {state.intents}")
+        # --- 步骤 4：UI 播报（此时播报的信息是经过补丁修正后的最准意图） ---
+        intent_icons = {
+            "search_knowledge_base": "📚 知识库检索",
+            "web_search": "🌐 联网增强",
+            "analyze_image": "👁️ 视觉解析",
+            "analyze_audio": "🎵 音频感知",
+            "analyze_video": "🎥 视频分析",
+            "complex_reasoning": "🧩 逻辑推演",
+            "chat": "💬 日常对话"
+        }
+        display_intents = [intent_icons.get(i, i) for i in state.intents]
+        
+        self._notify("toast", f"**最终决策**：{', '.join(display_intents)}", icon="🧩")
+        
         if "search_knowledge_base" in state.intents or "web_search" in state.intents:
-            st.toast(f"🎯 提取关键词: {' | '.join(state.sub_queries)}")
+            self._notify("toast", f"**提取关键词**：{' | '.join(state.sub_queries)}", icon="🎯")
             
         return state
 
@@ -177,7 +197,7 @@ class GraphOrchestrator:
             for idx, res in enumerate(results):
                 # 容错处理：如果任务返回的是异常对象
                 if isinstance(res, Exception):
-                    st.error(f"🚨 检索链路 [{task_names[idx]}] 出错: {res}")
+                    self._notify("error", f"🚨 检索链路 [{task_names[idx]}] 出错: {res}")
                     continue
                 
                 # 分发 RAG 结果
@@ -186,13 +206,13 @@ class GraphOrchestrator:
                     state.rag_nodes = nodes
                     if context_str:
                         state.system_content_blocks.append(PROMPTS["rag_system_prompt"].format(context_str=context_str))
-                        st.toast("📚 本地资料检索完成", icon="✅")
+                        self._notify("toast", "📚 本地资料检索完成", icon="✅")
                 
                 # 分发 Web 结果
                 elif task_names[idx] == "web":
                     if res and "未获取到" not in res:
                         state.system_content_blocks.append(PROMPTS["web_search_system_prompt"].format(web_context=res))
-                        st.toast("🌐 网络信息抓取完成", icon="✅")
+                        self._notify("toast", "🌐 网络信息抓取完成", icon="✅")
 
         return state
 

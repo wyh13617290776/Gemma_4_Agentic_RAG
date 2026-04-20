@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import httpx
 import socket
 import psutil
 import subprocess
@@ -145,3 +146,82 @@ class HardwareManager:
                 pass # 静默处理，防止显卡休眠等异常导致应用崩溃
 
         return metrics
+    
+    # =========================================================
+    # 新增：云端 API 连通性探活 (从 web_ui.py 抽离)
+    # =========================================================
+    @staticmethod
+    def check_cloud_api_health(protocol: str, base_url: str, key_env: str, model_id: str) -> str:
+        api_key = os.getenv(key_env, "")
+        if not api_key or api_key == "sk-dummy" or len(api_key) < 10:
+            return "🔴 API Key 未配置或无效"
+        
+        try:
+            if protocol == "openai":
+                if base_url and "dashscope.aliyuncs.com" in base_url:
+                    test_url = f"{base_url.rstrip('/')}/chat/completions"
+                    payload = {
+                        "model": model_id, 
+                        "messages": [{"role": "user", "content": "hi"}], 
+                        "max_tokens": 1
+                    }
+                    res = httpx.post(test_url, headers={"Authorization": f"Bearer {api_key}"}, json=payload, timeout=10.0)
+                else:
+                    url = f"{base_url.rstrip('/')}/models" if base_url else "https://api.openai.com/v1/models"
+                    res = httpx.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=5.0)
+                
+                if res.status_code == 200: return "🟢 在线 (验证通过)"
+                elif res.status_code == 401: return "🔴 鉴权失败 (Key 错误)"
+                elif res.status_code == 400: return "🟡 参数错误 (HTTP 400)"
+                elif res.status_code == 429: return "🟡 触发限流 (频率过高)"
+                elif res.status_code >= 500: return f"🔴 云端异常 (HTTP {res.status_code})"
+                else: return f"🟡 状态异常 (HTTP {res.status_code})"
+
+        except httpx.ConnectTimeout: return "🔴 连接超时 (请检查网络)"
+        except httpx.ConnectError: return "🔴 网络不可达 (请检查代理或域名)"
+        except Exception as e: 
+            print({str(e)}) 
+            return f"🔴 探测异常 ({str(e)[:20]}...)"
+            
+        return "⚪ 状态未知"
+
+    # =========================================================
+    # 新增：本地环境深度安检底层扫描 (从 web_ui.py 抽离)
+    # =========================================================
+    @staticmethod
+    def validate_local_env(cfg: dict, server_info: dict) -> list:
+        """扫描本地硬盘，返回缺失的依赖清单列表（为空则代表安检通过）"""
+        missing_deps = []
+        
+        # 1. 检查基础大语言模型权重与多模态权重
+        model_path = server_info.get("model_path", "")
+        if not model_path or not os.path.exists(model_path):
+            missing_deps.append("基础模型权重 (.gguf)")
+        mmproj_path = server_info.get("mmproj_path", "")
+        if not mmproj_path or not os.path.exists(mmproj_path):
+            missing_deps.append("多模态视觉权重 (mmproj-*.gguf)")
+        
+        # 2. 探测推理引擎
+        search_root = os.getcwd() 
+        found_exe, found_dlls = False, False
+        exe_path_from_cfg = cfg.get("llm_server", {}).get("server_exe_path", "")
+        
+        if exe_path_from_cfg and os.path.exists(exe_path_from_cfg):
+            found_exe = True
+            target_dir = os.path.dirname(exe_path_from_cfg)
+            if any(f.lower().endswith(('.dll')) for f in os.listdir(target_dir)):
+                found_dlls = True
+        
+        if not found_exe:
+            for root, dirs, files in os.walk(search_root):
+                if "llama" in root.lower():
+                    if "llama-server.exe" in files:
+                        found_exe = True
+                        if any(f.lower().endswith(('.dll')) for f in files):
+                            found_dlls = True
+                        break
+        
+        if not found_exe: missing_deps.append("推理核心引擎 (缺少 llama-server.exe)")
+        elif not found_dlls: missing_deps.append("引擎运行依赖 (缺失 *.dll 库文件)")
+
+        return missing_deps

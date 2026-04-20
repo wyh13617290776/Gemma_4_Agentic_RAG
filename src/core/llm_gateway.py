@@ -114,6 +114,17 @@ class LLMGateway:
             
         if adapter_type == "local_think":
             call_params["stop"] = ["<turn|>", "<|turn|>", "<eos>", "<end_of_turn>"]
+        
+        # =========================================================
+        # 修复：云端 API 严格校验防爆盾 (Parameter Sanitization)
+        # =========================================================
+        if "extra_body" in call_params and "enable_thinking" in call_params["extra_body"]:
+            # 修复：放行 DeepSeek V3/V3.2 的动态思维链开关，仅对原生具备推理标签的模型剥离此参数
+            if "r1" in model_id.lower() or "reasoner" in model_id.lower() or "qvq" in model_id.lower():
+                call_params["extra_body"].pop("enable_thinking", None)
+            # 如果清理后 extra_body 为空，直接干掉这个字典，防止连空字典都被拦截
+            if not call_params["extra_body"]:
+                call_params.pop("extra_body", None)
 
         # 5. 发起请求
         response = client.chat.completions.create(
@@ -166,10 +177,24 @@ class LLMGateway:
             extra = call_params.get("extra_body", {})
             extra["enable_thinking"] = True
             call_params["extra_body"] = extra
-            
-        # 本地模型 Stop 词防护
+
+        # 本地模型 Stop 词防护：
+        # 注意：不能把 <end_of_turn> 加入 stop 列表！
+        # Gemma 4 在思考模式下，</think> 标签之前就可能触发 <end_of_turn>，
+        # 导致整个思考块被截断，正文永远无法输出。
         if adapter_type == "local_think":
-            call_params["stop"] = ["<turn|>", "<|turn|>", "<eos>", "<end_of_turn>"]
+            call_params["stop"] = ["<turn|>", "<|turn|>", "<eos>"]
+
+        # =========================================================
+        # 修复：云端 API 严格校验防爆盾 (Parameter Sanitization)
+        # =========================================================
+        if "extra_body" in call_params and "enable_thinking" in call_params["extra_body"]:
+            # 修复：放行 DeepSeek V3/V3.2 的动态思维链开关，仅对原生具备推理标签的模型剥离此参数
+            if "r1" in model_id.lower() or "reasoner" in model_id.lower() or "qvq" in model_id.lower():
+                call_params["extra_body"].pop("enable_thinking", None)
+            # 如果清理后 extra_body 为空，直接干掉这个字典，防止某些厂商连空字典都拦截
+            if not call_params["extra_body"]:
+                call_params.pop("extra_body", None)
 
         # 发起流式请求
         stream = client.chat.completions.create(
@@ -185,7 +210,7 @@ class LLMGateway:
         
         # 🚀 适配器分流处理 (三轨策略)
         
-        # A 轨：DeepSeek 专属 (提取 reasoning_content 字段)
+        # A 轨：DeepSeek 专属 (保持您已修复的 V3.2 兼容逻辑)
         if adapter_type == "deepseek":
             for chunk in stream:
                 delta = chunk.choices[0].delta
@@ -195,26 +220,56 @@ class LLMGateway:
                 content = delta.content or ""
                 yield {"reasoning": reasoning or "", "content": content}
         
-        # B 轨：本地 Gemma 4 专属 (物理切割 <think> 标签)
+        # 👑 B 轨：本地模型专属 (网关级内联标签剥离 - 增强防泄露版)
         elif adapter_type == "local_think":
             is_thinking = False
+            buffer = ""
+            # 定义所有可能的标签及其前缀
+            all_tags = ["<think>", "<|think|>", "</think>", "</|think|>"]
+            # 自动生成所有可能的标签前缀（如 "<", "<t", "<th" ...）用于拦截
+            tag_prefixes = {tag[:i] for tag in all_tags for i in range(1, len(tag))}
+
             for chunk in stream:
-                content = chunk.choices[0].delta.content or ""
-                if not content: continue
-                if "<think>" in content:
-                    is_thinking = True
-                    content = content.replace("<think>", "")
-                if "</think>" in content:
-                    is_thinking = False
-                    parts = content.split("</think>")
-                    yield {"reasoning": parts[0], "content": parts[1] if len(parts) > 1 else ""}
-                    continue
-                if is_thinking:
-                    yield {"reasoning": content, "content": ""}
-                else:
-                    yield {"reasoning": "", "content": content}
-        
-        # C 轨：标准 OpenAI 模型 (仅提取 content)
+                token = chunk.choices[0].delta.content or ""
+                buffer += token
+                
+                # 1. 递归处理缓冲区中的完整标签
+                found_tag = True
+                while found_tag:
+                    found_tag = False
+                    for tag in all_tags:
+                        if tag in buffer:
+                            parts = buffer.split(tag, 1)
+                            # 如果是结束标签，先把之前的 buffer 作为 reasoning 吐出
+                            if tag.startswith("</"):
+                                if parts[0]: yield {"reasoning": parts[0], "content": ""}
+                                is_thinking = False
+                            # 如果是开始标签，先把之前的 buffer 作为 content 吐出
+                            else:
+                                if parts[0]: yield {"reasoning": "", "content": parts[0]}
+                                is_thinking = True
+                            
+                            buffer = parts[1] # 剩余部分留存
+                            found_tag = True
+                            break
+                
+                # 2. 👑 核心修复：安全探测。检查 buffer 结尾是否匹配任何标签的前缀
+                # 如果 buffer 结尾是 "<" 或 "<t" 等，我们必须 hold 住，不能 yield
+                is_incomplete = any(buffer.endswith(p) for p in tag_prefixes)
+                
+                if not is_incomplete and buffer:
+                    if is_thinking:
+                        yield {"reasoning": buffer, "content": ""}
+                    else:
+                        yield {"reasoning": "", "content": buffer}
+                    buffer = ""
+            
+            # 3. 扫尾逻辑
+            if buffer:
+                if is_thinking: yield {"reasoning": buffer, "content": ""}
+                else: yield {"reasoning": "", "content": buffer}
+
+        # C 轨：其他标准模型
         else:
             for chunk in stream:
                 content = chunk.choices[0].delta.content or ""
